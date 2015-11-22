@@ -1,0 +1,983 @@
+;*        MODULE SCCDRV - SERIAL COMMUNICATION CONTROLLER DRIVER
+;
+;  THIS MODULE IS A GENERALIZED DEVICE DRIVER FOR THE
+;  SERIAL COMMUNICATIONS CONTROLLER, WHICH INTERFACES THE
+;  SERIAL (MODEM) PORT, THE PRINTER, THE KEYBOARD, AND THE
+;  60HZ CLOCK.  ITS ENTRY POINTS ARE:
+;
+;  SCCINIT - INITIALIZE HARDWARE AND DRIVER SOFTWARE.  THIS 
+;            ENTRY POINT IS INTENDED FOR USE ONLY BY MONITOR.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - ALL REGISTERS USED
+;
+;  SERSTAT - GET STATUS OF SERIAL INTERFACE.  REPORTS CARRIER DETECT AND
+;            WHETHER THERE IS A CHARACTER IN THE RECEIVER.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - IF A REGISTER = E.UNTRDY, NO CARRIER DETECTED.
+;                C REGISTER CONTAINS COUNT OF CHARACTERS IN BUFFER.
+;                ALL REGISTERS USED
+;
+;  SERREAD - READ ONE CHARACTER FROM THE SERIAL INTERFACE, WAITING IF 
+;           NECESSARY.  SERREAD WILL RETURN WITH AN ERROR CODE IF
+;           THE CARRIER DROPS.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - RECEIVED CHARACTER IN C REGISTER.
+;                IF A REGISTER = E.UNTRDY, NO CARRIER DETECTED.
+;                IF A REGISTER = E.URDTER, DATA ERROR DETECTED.
+;                ALL REGISTERS USED.
+;
+;  SERWRITE - WRITE ONE CHARACTER TO THE SERIAL INTERFACE, WAITING IF 
+;             TRANSMITTER IS ALREADY FULL.  SERWRITE WILL RETURN WITH 
+;             AN ERROR CODE IF THE CARRIER DROPS. 
+;
+;         ENTRY - CHARACTER IN C REGISTER
+;
+;         EXIT - IF A REGISTER = E.UNTRDY, NO CARRIER DETECTED
+;                ALL REGISTERS USED.
+;
+;
+;  SERSET - THIS ROUTINE SETS THE OPERATING PARAMETERS OF PORT A OR PORT B 
+;               OF THE  SCC.  THE TRANSMITTER AND RECEIVER OF THE SPECIFIED 
+;               PORT ARE  DISABLED WHILE THE PARAMETERS ARE CHANGED, AND 
+;               THEN RE-ENABLED.
+;
+;       ENTRY - C CONTAINS 0 FOR PORT A, 1 FOR PORT B;
+;               B CONTAINS THE SCC CLOCK SELECT BYTE;
+;               H CONTAINS THE FIRST MODE CONTROL BYTE;
+;               L CONTAINS THE SECOND MODE CONTROL BYTE;
+;
+;       EXIT -  A AND C MODIFIED;
+;               ALL OTHERS PRESERVED.
+;
+;  SERCTL - DUMMY ROUTINE THAT HANDLES REMAINING CALLS TO THE OLD
+;           SERIAL INTERFACE CONTROL.
+;
+;         ENTRY - PARAMETERS IGNORED.
+;
+;         EXIT - ALL REGISTERS USED.
+;
+;  SCCINTR - PROCESS SCC INTERRUPT
+;
+;         ENTRY - AF SAVED ON STACK
+;                 ENTERED VIA A JUMP (NOT A CALL)
+;
+;         EXIT - RETURNS DIRECTLY TO INTERRUPTED USER PROGRAM
+;
+;  KEYSTAT - GET KEYBOARD STATUS.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - IF CHARACTER WAITING, C REGISTER CONTAINS FF.
+;                IF NOT, C REGISTER CONTAINS 00.
+;                A REGISTER CONTAINS E.NOERR.
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYCHAR - INPUT A SINGLE CHARACTER FROM THE KEYBOARD,
+;            WAITING IF NECESSARY.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - CHARACTER IN C REGISTER.
+;                A CONTAINS E.NOERR
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYNECHO - INPUT A SINGLE CHARACTER FROM THE KEYBOARD,
+;             BUT DO NOT ECHO TO THE DISPLAY.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - CHARACTER IN C REGISTER.
+;                A REGISTER CONTAINS E.NOERR
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYPOLL - POLL KEYBOARD.  THIS ROUTINE SHOULD BE CALLED PERIODICALLY
+;            WHILE INTERRUPTS ARE DISABLED TO CHECK FOR KEYSTRIKES.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - AF USED
+;                ALL OTHERS PRESERVED
+;
+;
+;  This module also (indirectly) calls entry point USERINT in MONITOR, and 
+;  references MONITOR variable USERHL.
+;
+;  ALL KEYBOARD CHARACTERS ARE ECHOED TO THE DISPLAY WHEN READ BY THE
+;  USER PROGRAM, EXCEPT THOSE READ BY KEYNECHO.
+;  A CARRIAGE RETURN IS ECHOED AS A
+;  CARRIAGE RETURN - LINE FEED SEQUENCE.
+;
+;
+        .PAGE
+;*      Modification History:
+;
+;  04 Feb 85 - Added MONDDT assembly option for MONITOR.
+;  05 Jan 85 - Added SERSET routine and modified SCCINIT to use it.
+;  29 Dec 84 - Added user interrupt and upper-case lock.
+;  27 Dec 84 - Ignore repeats while there are keyboard characters buffered up.
+;              Clear repeat flag on every new keystrike.
+;  13 Dec 84 - Adapted code to interface to the SCC instead of a 8251.
+;              Merged with keyboard driver and added clock clode.
+;  08 Sep 84 - Modified read and write routines to not check the status of
+;              the carrier detect line.  This is needed to send commands to
+;              the Hayes Smartmodem.
+;  16 Sep 84 - Added processing for DC3/DC1 comming from the remote system.
+;
+
+        
+        
+        
+        
+;*        DEFINITIONS
+;
+;
+SCC     .EQU    0D0H            ; SCC I/O PORT BASE ADDRESS
+
+        .IF     ~DDTMON
+        
+KEY_TBL .EQU    0C00H           ; KEY TRANSLATION TABLE ADDRESS
+
+        .ELSE
+        
+KEY_TBL .EQU    0700H           ; KEY TRANSLATION TABLE ADDRESS
+
+        .ENDC
+        
+RPERIOD .EQU    3               ; KEY REPEAT PERIOD, IN TICKS
+MAXSCNT .EQU    128              ; SERIAL BUFFER HOLDS 128 CHARACTERS
+MAXKCNT .EQU    25.             ; TYPE-AHEAD BUFFER SIZE
+SERSTOP .EQU    MAXSCNT*2/3      ; STOP WHEN BUFFER 2/3 FULL
+SERSTART .EQU   MAXSCNT*1/3      ; START WHEN BUFFER 1/3 FULL
+
+
+
+;*        WORK AREA 
+;
+;
+KEYCNT  .EQU    SCCWORK         ; BUFFER COUNT
+PREFIX  .EQU    SCCWORK+1       ; CONTAINS KEYCODE PREFIX BYTE
+UPPER   .EQU    PREFIX+1        ; NON-ZERO = TRANSLATER ALPHABETIC TO UPPER
+REPEAT  .EQU    UPPER+1        ; NON-ZERO FOR REPEATING KEY
+RTIME   .EQU    REPEAT+1        ; TICKS UNTIL NEXT KEYBOARD REPEAT
+RCHAR   .EQU    RTIME+1         ; KEY TO BE REPEATED
+TICKCLK .EQU    RCHAR+1         ; TICK CLOCK, LOW BYTE FIRST
+SERCNT  .EQU    TICKCLK+4       ; COUNT OF BYTES IN BUFFER
+SERIN   .EQU    SERCNT+1        ; IN POINTER TO BUFFER
+SEROUT  .EQU    SERIN+1         ; OUT POINTER TO BUFFER
+SERFLG  .EQU    SEROUT+1        ; NON-ZERO IF HOST HAS BEEN STOPPED
+SERHOFF .EQU    SERFLG+1        ; NON-ZERO IF HOST STOPPED US
+KEYBUF  .EQU    SERHOFF+1       ; FIRST BYTE OF KEYBOARD DATA BUFFER
+
+        .IF     ~DDTMON
+SERBUF  .EQU    SERWORKB        ; BUFFER BUFFER SPACE
+        .ENDC
+        
+
+
+;       SCC HARDWARE REGISTER ADDRESSES
+;
+;
+MRXA    .EQU    SCC+0           ; PORT A MODE REGISTERS 1 AND 2
+SCCSRA  .EQU    SCC+1           ; INPUT - PORT A STATUS REGISTER
+CSRA    .EQU    SCC+1           ; OUTPUT - PORT A CLOCK SELECT 
+CRA     .EQU    SCC+2           ; OUTPUT - PORT A COMMAND REGISTER
+RHRA    .EQU    SCC+3           ; INPUT - PORT A RECEIVER HOLDING REGISTER
+THRA    .EQU    SCC+3           ; OUTPUT - PORT A TRANSMITTER HOLDING REG.
+IPCR    .EQU    SCC+4           ; INPUT - INPUT PORT CHANGE REGISTER
+ACR     .EQU    SCC+4           ; OUTPUT - AUXILARY COMMAND REGISTER
+ISR     .EQU    SCC+5           ; INPUR - INTERRUPT STATUS REGISTER
+IMR     .EQU    SCC+5           ; OUTPUT - INTERRUPT MASK REGISTER
+CTU     .EQU    SCC+6           ; INPUT - COUNTER/TIMER UPPER
+CTUR    .EQU    SCC+6           ; OUTPUT - COUNTER/TIMER UPPER REGISTER
+CTL     .EQU    SCC+7           ; INPUT - COUNTER/TIMER LOWER
+CTLR    .EQU    SCC+7           ; OUTPUT - COUNTER/TIMER LOWER REGISTER
+MRXB    .EQU    SCC+8           ; PORT B MODE REGISTERS 1 AND 2
+SRB     .EQU    SCC+9           ; INPUT - PORT B STATUS REGISTER
+CSRB    .EQU    SCC+9           ; OUTPUT - PORT B CLOCK SELECT
+CRB     .EQU    SCC+0AH         ; OUTPUT - PORT B COMMAND REGISTER
+RHRB    .EQU    SCC+0BH         ; INPUT - PORT B RECEIVER HOLDING REGISTER
+THRB    .EQU    SCC+0BH         ; OUTPUT - PORT B TRANSMITTER HOLDING REG.
+IP      .EQU    SCC+0DH         ; INPUT - INPUT PORT
+OPCR    .EQU    SCC+0DH         ; OUTPUT - OUTPUT PORT CONTROL REGISTER
+START   .EQU    SCC+0EH         ; INPUT - START COUNTER COMMAND
+SCCSET  .EQU    SCC+0EH         ; OUTPUT - SET OUTPUT PORT BITS COMMAND
+STOP    .EQU    SCC+0FH         ; INPUT - STOP COUNTER COMMAND
+RESET   .EQU    SCC+0FH         ; OUTPUT - RESET OUTPUT PORT BITS COMMAND
+        .PAGE
+;*        ENTRY POINT SCCINIT 
+;
+;
+SCCINIT
+;
+;  ZERO THE LOCAL VARIABLES.
+;
+
+        XOR     A
+        LD      B,SERHOFF-KEYCNT+1       ; NUMBER OF BYTES TO ZERO
+        LD      HL,KEYCNT               ; STARTING ADDRESS
+
+SERZLOOP
+        LD      (HL),A                  ; ZERO A BYTE
+        INC     HL
+        DJNZ    SERZLOOP                ; LOOP UNTIL ALL ZEROED
+;
+;  INITIALIZE THE SCC.
+;  
+        LD      BC,8800H        ; SET PORT A PARAMETERS - 1200 BAUD
+        LD      HL,0207H        ; EVEN PARITY, 7 BITS, 1 STOP BIT
+        CALL    SERSET
+        
+        LD      BC,0CC01H       ; SET PORT B PARAMETERS - 9600 BAUD
+        LD      HL,9317H        ; NO PARITY, 8 BITS, USE RTS, CTS CONTROLS TX
+        CALL    SERSET
+        
+        LD      A,2H            ; ENABLE RTS LINE
+        OUT     (SCCSET),A
+        
+        LD      A,0E0H          ; TIMER MODE X1
+        OUT     (ACR),A
+        LD      A,2AH           ; INTERRUPT ON EITHER RECEIVER OR CLOCK
+        OUT     (IMR),A
+        LD      A,3CH           ; SET TIMER REGISTER
+        OUT     (CTUR),A
+        LD      A,00H   
+        OUT     (CTLR),A
+        
+        IN      A,(START)       ; START THE TIMER
+        
+        RET
+        .PAGE
+;*      SUBROUTINE SCCINTR - SCC INTERRUPT ROUTINE
+;
+;
+;         ENTRY - AF ON STACK 
+;                 ENTERED VIA A JUMP, NOT A CALL
+;
+;         EXIT - TO INTERRUPT ROUTINE FOR INTERRUPTING PART OF SCC
+;
+SCCINTR
+        IN      A,(ISR)                 ; GET INTERRUPT STATUS
+        BIT     3,A
+        JR      Z,NOTTIME              ; JUMP IF NOT THE TIMER
+;
+;  PROCESS INTERRUPT FROM THE TIMER.
+;
+        CALL    TIMESER                 ; SERVICE THE TIMER
+        JR      SCCIRET
+        
+NOTTIME
+        
+        .IF     ~DDTMON
+        
+        BIT     1,A
+        JR      Z,NOTSER                ; JUMP IF NOT SERIAL PORT INTERRUPT
+;
+;  PROCESS INTERRUPT FROM SCC PORT A RECEIVER (SERIAL INTERFACE).
+;
+        CALL    SERPOLL         ; GO READ THE RECEIVER
+        JR      SCCIRET
+
+        .ENDC
+
+
+
+NOTSER
+        BIT     5,A
+        JR      Z,NOTKEY        ; JUMP IF NOT PORT B INTERRUPT
+;
+;  PROCESS INTERRUPT FROM SCC PORT B RECEIVER (KEYBOARD).
+;
+        CALL    KEYPOLL         ; GO READ THE KEYBOARD
+        
+NOTKEY
+SCCIRET
+        POP     AF              ; RESTORE USER AF 
+        EI
+        RETI
+        .PAGE
+;*      SUBROUTINE TIMESER
+;  
+;  SERVICE INTERRUPT FROM THE TIMER ON THE SCC CHIP.
+;
+;       ENTRY - USER AF ON STACK
+;
+;       EXIT - ALL REGISTERS EXCEPT AF PRESERVED.
+;
+TIMESER
+        IN      A,(STOP)        ; ACKNOWLEDGE THE INTERRUPT
+        PUSH    HL              ; SAVE USER HL
+;
+;  ADVANCE THE TICK CLOCK KEPT IN MEMORY.
+;
+        LD      HL,TICKCLK      ; HL POINTS TO TICK CLOCK
+
+$10     INC     (HL)            ; BUMP TICK COUNT
+        JR      NZ,$20          ; JUMP IF NO CARRY TO NEXT BYTE
+        
+        INC     HL              ; BUMP HL TO POINT TO NEXT BYTE
+        JR      $10             ; JUMP TO ADD IN CARRY
+        
+        
+        
+$20
+        LD      A,(REPEAT)      ; GET THE KEYBOARD REPEAT FLAG
+        AND     A
+        JR      Z,$30           ; JUMP IF NOT SET
+        
+        LD      HL,RTIME        ; POINTER TO REPEAT COUNTDOWN
+        DEC     (HL)            ; DECREMENT COUNTDOWN
+        JR      NZ,$30          ; JUMP IF NOT TIME FOR REPEAT
+        
+        LD      A,RPERIOD       ; REMEMBER WHEN NEXT TO DO THIS
+        LD      (HL),A
+;
+;  Check to see if there are keyboard characters buffered up that
+;  have not yet been read.  If so, do not add this repeat character.
+;
+        LD      A,(KEYCNT)      ; COUNT OF BUFFERED CHARACTERS
+        AND     A
+        JR      NZ,$30          ; JUMP IF THERE ARE SOME IN BUFFER
+        
+        LD      A,(RCHAR)       ; GET REPEAT CHARACTER
+        PUSH    BC
+        CALL    KEYENTER        ; PUT KEY IN BUFFER
+        POP     BC              ; RESTORE REGISTERS
+        
+$30
+        POP     HL              ; RESTORE USER HL
+        RET                     ; RETURN TO INTERRUPT ROUTINE
+        .PAGE
+
+        .IF     ~DDTMON
+        
+;*      SUBROUTINE READCLK - GET CURRENT VALUE OF TICK CLOCK
+;
+;       ENTRY - NO PARAMETERS
+; 
+;       EXIT - LOW CLOCK WORK IN HL
+;              HIGH CLOCK WORD IN DE
+;              ALL OTHER REGISTERS PRESERVED
+;
+READCLK 
+        LD      HL,(TICKCLK)    ; GET LOW WORD
+        LD      DE,(TICKCLK+2)  ;    AND HIGH WORD
+        RET
+        
+        .ENDC
+        
+        .PAGE
+;*        SUBROUTINE KEYSTAT
+;
+;
+KEYSTAT
+        LD      A,(KEYCNT)      ; GET QUEUE COUNT 
+        AND     A               ; CHECK FOR ZERO
+        JR      Z,NOKY          ; JUMP IF NO DATA AVAILABLE 
+
+        LD      A,0FFH          ; SET UP EXIT CONDITION
+
+NOKY
+        LD      C,A             ; MOVE DATA TO C REGISTER
+
+NOKERR
+        LD      A,E_NOERR       ; NO ERRORS DETECTED
+        RET
+        .PAGE
+;*        ENTRY POINT KEYNECHO - INPUT CHARACTER WITH NO ECHO
+;
+;
+KEYNECHO
+        LD      A,(KEYCNT)      ; GET COUNT OF CHARS IN BUFFER
+        AND     A               ; CHECK FOR ZERO
+        JR      Z,KEYNECHO      ; LOOP IF NO DATA AVAILABLE 
+
+        DEC     A               ; COUNT THE ONE WE'RE REMOVING
+        LD      (KEYCNT),A      ; UPDATE THE COUNT IN MEMORY
+        LD      C,A             ; MOVE COUNT TO C 
+        LD      A,(KEYBUF)      ; GET FIRST CHARACTER ON QUEUE
+        JR      Z,$10           ; JUMP IF QUEUE NOW EMPTY
+
+        LD      HL,KEYBUF+1     ; MOVE UP KEYBOARD QUEUE
+        LD      DE,KEYBUF
+        LD      B,0             ; COUNT IN BC
+        LDIR
+        
+$10
+        JP      NOKY            ; GO RETURN DATA TO CALLER
+        .PAGE
+;*        SUBROUTINE KEYPOLL - POLL THE KEYBOARD FOR A CHARACTER
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - AF USED
+;
+KEYPOLL
+        IN      A,(SRB)        ; GET PORT B STATUS
+        BIT     0,A
+        RET     Z               ; RETURN IF NOTHING THERE
+;
+;  READ THE CHARACTER FROM PORT B.  IF IT IS THE FIRST BYTE IN THE
+;  TWO-BYTE SEQUENCE, STORE IT AWAY AS THE PREFIX.
+;
+        PUSH    BC              ; SAVE HL AND BC
+        PUSH    HL
+
+        XOR     A               ; CLEAR THE REPEAT FLAG
+        LD      (REPEAT),A      
+        
+        IN      A,(RHRB)        ; READ BYTE FROM PORT B
+        AND     A               ; 
+        JR      Z,$09           ; IF END-OF-HOLD, WE'VE CLEARED FLAG ALREADY
+        
+        JP      P,$10           ; JUMP IF NOT PREFIX BYTE
+        
+        LD      (PREFIX),A      ; SAVE PREFIX FOR NEXT INTERRUPT
+$09     JP      KPEXIT
+
+
+
+;
+;  FETCH THE CHARACTER FROM THE
+;  TRANSLATION TABLE.
+;
+$10
+        SLA     A               ; MOVE CODE OVER ONE BIT
+        LD      HL,PREFIX       ; MAKE HL POINT TO THE PREFIX BYTE
+        
+        BIT     0,(HL)          ; CHECK SHIFT BIT IN PREFIX
+        JR      Z,$20           ; JUMP IF NO SHIFT
+        
+        INC     A               ; SET BIT 0 OF SECOND BYTE
+        
+$20     LD      C,A             ; MOVE BYTE TO LOWER BC
+        LD      B,KEY_TBL/100H  ; MAKE POINTER INTO TRANSLATION TABLE
+        LD      A,(BC)          ; GET TRANSLATED CHARACTER
+;
+;  CHECK TO SEE IF THE FCTN KEY IS DOWN.  IF SO, DO SOME SPECIAL PROCESSING
+;  OF CHARACTERS.
+;
+        BIT     2,(HL)          ; CHECK FCTN BIT IN PREFIX
+        JR      Z,$27           ; JUMP IF NOT SET
+;
+;  CHECK FOR A USER INTERRUPT.  THIS IS SPECIFIED AS FCTN, SHIFT, AND THE
+;  "-" KEY ON THE NUMERIC KEYPAD.
+;
+        CP      0E3H            ; CHECK CHAR FOR SHIFTED "-"
+        JR      NZ,$21          ; JUMP IF NOT
+;
+;  THIS KEYSTRIKE IS A USER INTERRUPT REQUEST.  CHANGE THE STACK SO THAT THE
+;  PROCESSOR WILL GO TO MONITOR'S USERINT ROUTINE WHEN WE RETURN FROM THIS
+;  INTERRUPT.  THE USER'S ORIGINAL PC WILL BE ON THE TOP OF THE STACK WHEN
+;  USERINT IS ENTERED.
+;
+        POP     AF              ; SAVE USER HL IN AF TEMPORARILY
+        POP     BC              ; RESTORE USER BC
+        POP     HL              ; DISCARD KEYPOLL RETURN ADDRESS
+        
+        LD      HL,USERINT      ; ADR OF MONITOR ENTRY POINT
+        EX      (SP),HL         ; PUT ADR ON TOS, USER AF TO HL
+        PUSH    HL              ; PUT USER AF BACK ON STACK
+        PUSH    AF              ; MOVE USER HL BACK TO HL
+        POP     HL
+        POP     AF              ; RESTORE USER AF
+        EI
+        RETI                    ; "RETURN" TO MONITOR
+        
+        
+;
+;  CHECK FOR THE UPPER LOCK KEY.  THIS IS THE TAB KEY WITH FCTN.
+;
+$21
+        CP      09H             ; CHECK FOR TAB (SHIFT OR NO SHIFT)
+        JR      NZ,$22          ; JUMP IF NOT
+;
+;  TOGGLE THE UPPER FLAG.
+;
+        LD      A,(UPPER)       ; GET UPPER LOCK FLAG
+        XOR     1               ; TOGGLE BIT 0
+        LD      (UPPER),A       ; STORE IT BACK
+        
+        JP      KPEXIT          ; GO EXIT FROM POLLER
+        
+        
+        
+;
+;  IF THE FCTN KEY IS DOWN AND THE CHARACTER IS BETWEEN 40H AND 7FH
+;  TRANSLATE IT TO AN ASCII CONTROL CODE.  IF THE KEY IS ONE
+;  OF THOSE MARKED F1 TO F8, TRANSLATE IT TO A FUNCTION CODE.
+;
+$22
+        CP      040H            ; CHECK IF IN CONTROL RANGE
+        JP      C,$25           ; NOT IN RANGE
+        
+        CP      07FH+1
+        JP      NC,$25          ; JUMP IF NOT IN CONTROL RANGE
+        
+        AND     1FH             ; CONVERT TO ASCII CONTROL CHARACTER
+        JR      $30             ; GO RETURN KEY TO USER
+        
+
+
+$25     CP      "1"             ; CHECK IF IN FUNCTION RANGE
+        JP      C,$27           ; JUMP IF NOT IN FUNCTION RANGE
+        
+        CP      "9"+1
+        JP      NC,$27          ; JUMP IF NOT IN FUNCTION RANGE
+
+        ADD     A,080H          ; CONVERT TO FUNCTION CODE
+        JR      $30             ; GO RETURN CODE TO USER
+
+
+;
+;  IF THE LOCK UPPER FLAG IS SET AND THE CHARACTER IS LOWER-CASE ALPHABETIC,
+;  TRANSLATE IT TO UPPER CASE.
+;
+$27     
+        LD      C,A             ; SAVE CHARACTER
+        LD      A,(UPPER)       ; GET UPPER FLAG
+        AND     A
+        LD      A,C             ; GET BACK THE CHARACTER
+        JR      Z,$30           ; JUMP IF NOT SET
+        
+        CP      "a"
+        JP      C,$30           ; JUMP IF NOT LOWER
+        
+        CP      "z"+1
+        JP      NC,$30          ; JUMP IF NOT LOWER
+        
+        SUB     "a"-"A"         ; CONVERT TO UPPER CASE
+;
+;  SEE IF THIS IS A KEY HOLD KEYCODE.  IF SO, SET UP FOR THE
+;  CLOCK SERVICE ROUTINE TO DO THE REPEAT.  
+;
+$30
+        BIT     3,(HL)          ; CHECK HOLD BIT IN PREFIX BYTE
+        JR      Z,$40           ; JUMP IF NOT HOLD CODE
+        
+        LD      (RCHAR),A       ; SAVE THE CHARACTER THAT IS TO BE REPEATED
+        
+        LD      A,RPERIOD       ; REMEMBER WHEN NEXT TO ISSUE THE CHAR
+        LD      (RTIME),A
+        LD      (REPEAT),A      ; SET THE REPEAT FLAG
+        
+        LD      A,(RCHAR)       ; GET BACK THE CHARACTER
+;
+;  PUT THE CHARACTER INTO THE KEYBOARD BUFFER.
+;
+$40
+        CALL    KEYENTER        ; PUT THE KEY IN THE BUFFER
+;
+;  EXIT FROM KEYBOARD POLLER. 
+;
+KPEXIT
+        POP     HL              ; RESTORE HL AND BC
+        POP     BC
+
+        RET
+        .PAGE
+;*      SUBROUTINE KEYENTER - PUT CHARACTER INTO KEYBOARD BUFFER
+;
+;       ENTRY - CHARACTER IN A
+;
+;       EXIT - USES HL AND BC
+;
+KEYENTER
+;
+;  MAKE SURE THAT THERE IS ROOM IN THE QUEUE FOR THIS CHARACTER.
+;
+$30
+        LD      C,A             ; SAVE CHARACTER IN C
+        LD      A,(KEYCNT)      ; GET COUNT OF CHARS IN QUEUE
+        CP      MAXKCNT
+        RET     Z                 ; IGNORE KEYSTRIKE IF NO ROOM
+;
+;  UPDATE THE QUEUE COUNT.
+;
+        PUSH    BC              ; SAVE CHARACTER
+        LD      C,A             ; MOVE OLD COUNT TO C
+        INC     A               ; BUMP CHARACTER COUNT IN A 
+        LD      (KEYCNT),A      ; STORE UPDATED COUNT
+;
+;  PUT THE CHARACTER AT THE END OF THE QUEUE.
+;
+        LD      B,0             ; CLEAR TOP OF BC 
+        LD      HL,KEYBUF       ; ADDRESS OF QUEUE
+        ADD     HL,BC           ; COMPUTE PLACE IN BUFFER
+        POP     BC              ; GET BACK CHARACTER
+        LD      (HL),C          ; STORE CHARACTER INTO QUEUE
+        
+        RET
+        .PAGE
+;*        ENTRY POINT KEYCHAR - INPUT AND ECHO CHARACTER
+;
+;
+KEYCHAR
+        CALL    KEYNECHO        ; INPUT CHARACTER 
+
+;
+;  IF CHARACTER IS A FUNCTION KEY CODE, DO NOT TRY TO ECHO
+;  IT TO THE DISPLAY.
+;
+        LD      A,C             ; MOVE CHARACTER TO A
+        CP      80H             ; COMPARE TO FIRST FUNCTION CODE
+        JR      NC,$10      ; JUMP IF A FUNCTION KEY
+
+        PUSH    BC              ; SAVE CHARACTER
+        CALL    DISPCH          ; DISPLAY CHARACTER
+        POP     BC              ; GET CHARACTER BACK INTO A 
+;
+;  IF THE TYPED CHARACTER WAS A CARRIAGE RETURN, WE ADD A
+;  LINE FEED TO ITS ECHO.
+;
+        LD      A,C             ; MOVE CHARACTER TO A
+        CP      CH_CR
+        JP      NZ,NOKERR       ; GO RETURN IF NOT CARRIAGE RETURN
+
+        LD      C,CH_LF         ; OUTPUT A LINE FEED
+        CALL    DISPCH
+
+        LD      C,CH_CR         ; RESTORE CHARACTER THAT WAS TYPED
+
+$10
+        JP      NOKERR          ; GO RETURN TO CALLER
+        .PAGE
+
+        .IF     ~DDTMON
+        
+;*        ENTRY POINT SERSTAT 
+;
+;
+SERSTAT
+        LD      A,(SERCNT)       ; GET BUFFER COUNT
+        LD      C,A             ; MOVE TO C
+
+        IN      A,(IP)          ; GET INTERFACE STATUS
+        BIT     0,A
+        JR      Z,NOERR         ; JUMP IF CARRIER PRESENT
+
+
+
+;*
+;  CARRIER HAS DROPPED.  RETURN AN ERROR CODE OF DEVICE NOT READY.
+;
+NOCAR
+        XOR     A               ; CLEAR HOST STOP FLAG 
+        LD      (SERHOFF),A      
+        
+        LD      A,E_UNTRDY      ; ERROR CODE
+        RET
+        .PAGE
+;*        ENTRY POINT SERWRITE
+;
+;         ENTRY - CHARACTER IN C REGISTER
+;
+;         EXIT - IF A REGISTER NON-ZERO, NO CARRIER DETECTED
+;                A IS ONLY REGISTER USED
+;
+;  NOTE - THIS ROUTINE MUST BE CALLED WITH INTERRUPTS ENABLED.
+;
+SERWRITE
+
+HOFFCHK
+        LD      A,(SERHOFF)     ; SEE IF WE HAVE BEEN STOPPED BY HOST
+        AND     A
+        JR      NZ,HOFFCHK      ; LOOP UNTIL INTERRUPT CLEARS FLAG
+;
+;  THE FOLLOWING CODE PREVENTS INTERRUPTS FROM HAPPENING BETWEEN WHEN
+;  WE DISCOVER THE TRANSMITTER READY AND WHEN WE SEND THE NEXT 
+;  CHARACTER, WHILE STILL ALLOWING INTERRUPTS TO OCCUR WHILE WE WAIT.
+;
+OUTLOOP
+        EI                      ; OPEN WINDOW FOR INTERRUPTS TO OCCUR
+        DI                      ; PREVENT INTERRUPTS WHILE CHECKING STATUS
+        IN      A,(SCCSRA)      ; GET SERIAL INTERFACE STATUS
+        BIT     2,A
+        JR      Z,OUTLOOP       ; LOOP UNTIL TRANSMITTER READY
+
+        LD      A,C             ; MOVE CHARACTER TO BE SENT
+        OUT     (THRA),A        ; SEND CHARACTER TO SERIAL TRANSMITTER
+        EI                      ; RE-ENABLE INTERRUPTS
+NOERR
+        LD      A,E_NOERR       ; RETURN CODE OF NO ERROR
+        RET
+        .PAGE
+;*      SERIWRT - WRITE CHARACTER TO SERIAL INTERFACE AT INTERRUPT LEVEL
+;
+;  THIS ROUTINE IS CALLED AT INTERRUPT LEVEL TO SEND A CHARACTER OVER THE
+;  LINE.  IT IS USED BY SERPOLL TO SEND DC3 AND DC1.
+;
+;         ENTRY - CHARACTER IN C REGISTER
+;
+SERIWRT
+        PUSH    AF              ; SAVE CHARACTER TO BE TRANSMITTED
+        
+SERILOP
+        IN      A,(SCCSRA)      ; GET SERIAL INTERFACE STATUS
+        BIT     2,A
+        JR      Z,SERILOP       ; LOOP UNTIL TRANSMITTER READY
+
+        POP     AF              ; MOVE CHARACTER TO BE SENT
+        OUT     (THRA),A        ; SEND CHARACTER TO SERIAL TRANSMITTER
+        RET
+        .PAGE
+
+;*        ENTRY POINT SERREAD 
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - CHARACTER RETURNED IN C
+;                ERROR CODE IN A
+;
+;  NOTE THAT THIS ROUTINE RUNS WITH INTERRUPTS ENABLED.  THEREFORE, THE CODE
+;  HAS BEEN ARRANGED SO AS TO NOT INTERFERE WITH THE INTERRUPT SERVICE
+;  ROUTINE.
+;
+SERREAD
+;
+;  SEE IF THERE ARE CHARACTERS IN THE BUFFER.
+;
+        LD      A,(SERCNT)       ; GET BUFFER COUNT
+        AND     A
+        JR      Z,SERREAD       ; LOOP TO WAIT FOR CHAR
+
+
+
+;*
+;  THERE IS AT LEAST ONE CHARACTER IN THE BUFFER.  CHECK THE ERROR
+;  FLAGS THAT ARE IN THE BUFFER WITH IT, AND RETURN THE CHARACTER
+;  TO THE CALLER.
+;
+SERRD1
+        LD      A,(SEROUT)      ; GET THE OUT OFFSET
+        LD      L,A             ; MOVE IT TO BOTTOM OF HL
+        LD      H,SERBUF/0100H  ; CREATE MEMORY POINTER INTO BUFFER
+        LD      C,(HL)          ; GET CHARACTER OUT OF BUFFER
+        INC     L               ; ADVANCE OFFSET
+        LD      B,(HL)          ; GET ERROR BITS OUT OF BUFFER
+        INC     L               ; ADVANCE OFFSET AGAIN
+        LD      A,L
+        LD      (SEROUT),A      ; STORE UPDATED OFFSET INTO MEMORY
+;
+;  DECREMENT THE CHARACTER COUNT.  THIS IS DONE AFTER THE BUFFER OFFSET
+;  IS ADJUSTED, AND WITH A INDIVISIBLE OPERATION, TO AVOID INTEREFERENCE 
+;  WITH THE INTERRUPT SERVICE ROUTINE.
+;
+        LD      HL,SERCNT       ; ADDRESS OF COUNTER
+        DEC     (HL)            ; DECREMENT COUNT
+;
+;  IF WE HAVE STOPPED THE HOST, AND THE BUFFER IS NOW LESS THAN 1/3 FULL,
+;  START UP THE HOST.
+;
+        LD      A,(SERFLG)      ; GET FLAGS
+        AND     A               ; SEE IF NON-ZERO
+        JR      Z,$20           ; JUMP IF NOT STOPPED
+        
+        LD      A,(HL)          ; GET CURRENT BUFFER COUNT
+        CP      SERSTART
+        JR      NC,$20          ; JUMP IF MORE THAN 1/3 FULL
+        
+        LD      A,CH_DC1        ; SEND DC1 TO RESTART THE HOST
+        CALL    SERIWRT
+        
+        XOR     A               ; CLEAR THE STOPPED FLAG
+        LD      (SERFLG),A
+;
+;  GET BACK THE DATA CHARACTER, AND CHECK THE STATUS OF THE 
+;  CHARACTER.
+;
+$20
+        LD      A,B             ; GET STATUS CODE
+        AND     0F0H
+        JP      Z,NOERR         ; JUMP IF NO ERROR
+
+        LD      A,E_URDTER      ; ERROR CODE
+        RET
+        .PAGE
+;*        SUBROUTINE SERPOLL - POLL SERIAL INTERFACE
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - AF USED
+;
+;
+;  THIS FIRST CODE IS PART OF THE HANDLER FOR DC1 AND DC3 FROM HOST.
+;  IT IS PUT HERE TO AVOID A LONG JUMP.
+;
+SERHDC1 
+        XOR     A
+        
+SERHDC3
+        LD      (SERHOFF),A     ; SET FLAG ZERO OR NON-ZERO
+SEREXR
+        POP     BC              ; RESTORE HL
+        RET
+        
+        
+        
+;
+;  MAIN ENTRY POINT.
+;
+SERPOLL
+        IN      A,(SCCSRA)     ; GET SERIAL INTERFACE STATUS
+        BIT     0,A
+        RET     Z               ; RETURN IF RECEIVER NOT FULL
+
+        PUSH    BC              ; SAVE BC
+
+        IN      A,(RHRA)        ; READ THE DATA CHARACTER & CLEAR INTERR.
+        LD      B,A             ; SAVE DATA IN B
+;
+;  CHECK TO SEE IF THE CHARACTER IS A DC1 OR DC3.  IF SO, SET THE HOST
+;  STOP FLAG APPROPRIATELY.  NOTE THAT THIS WILL EAT EXCESS DC3-S, BUT
+;  THAT-S PROBABLY OK.
+;
+        CP      CH_DC3
+        JR      Z,SERHDC3       ; JUMP IF HOST SEND DC3
+        
+        CP      CH_DC1
+        JR      Z,SERHDC1       ; JUMP IF HOST SEND DC1
+;
+;  MAKE SURE THAT THERE IS ROOM IN THE BUFFER BUFFER FOR THIS
+;  CHARACTER.  IF NOT, JUST DISCARD THE CHARACTER.
+;
+        LD      A,(SERCNT)       ; GET BUFFER BYTE COUNT
+        CP      MAXSCNT         ; COMPARE TO MAXIMUM BUFFER COUNT
+        JR      Z,SEREXR        ; JUMP IF THERE IS NO ROOM IN BUFFER
+;
+;  PUT CHARACTER AND STATUS BYTE INTO THE BUFFER.
+;
+        PUSH    HL
+        LD      A,(SERIN)       ; GET BUFFER OFFSET
+        LD      L,A             ; PUT INTO BOTTOM OF HL
+        LD      H,SERBUF/0100H  ; CREATE POINTER INTO BUFFER
+        
+        LD      (HL),B          ; PUT INTO BUFFER
+        INC     L               ; BUMP BUFFER POINTER
+        IN      A,(SCCSRA)      ; GET INTERFACE STATUS
+        LD      (HL),A          ; PUT INTO BUFFER
+        LD      B,A             ; SAVE STATUS IN B
+        INC     L               ; BUMP POINTER AGAIN
+        LD      A,L             ; STORE OFFSET BACK INTO MEMORY
+        LD      (SERIN),A
+;
+;  BUMP THE BUFFER CONTENTS COUNTER.
+;
+        LD      HL,SERCNT       ; BUMP CONTENTS POINTER
+        INC     (HL)
+;
+;  IF ONE OR MORE ERRORS WERE DETECTED ON THIS CHARACTER, RESET
+;  THE ERROR FLAG IN THE SERIAL INTERFACE.
+;
+        LD      A,B             ; GET STATUS FROM LAST CHARACTER
+        AND     0F0H
+        JR      Z,$30           ; JUMP IF NO ERRROR DETECTED
+        
+        LD      A,045H          ; RESET ERROR STATUS
+        OUT     (CRA),A
+;
+;  SEE IF BUFFER IS MORE THAN 2/3 FULL.  IF SO, SEND A DC3 TO STOP THE
+;  HOST FROM TRANSMITTING (ASSUMING THAT WE HAVEN-T ALREADY DONE SO).
+;
+$30
+        LD      A,(SERCNT)      ; GET COUNT OF CHARS IN BUFFER
+        CP      SERSTOP         ; COMPARE TO THRESHOLD
+        JR      C,SEREXIT       ; JUMP IF PLENTY OF ROOM
+        
+        LD      HL,SERFLG       ; ADDRESS OF FLAG
+        LD      A,(HL)          ; CHECK TO MAKE SURE DC3 NOT ALREADY SENT
+        AND     A
+        JR      NZ,SEREXIT      ; JUMP IF WE-VE ALREADY DONE IT
+        
+        LD      A,CH_DC3           ; STOP THE HOST
+        CALL    SERIWRT
+        
+        INC     (HL)            ; MARK THAT WEVE SEND A DC3
+;
+;  EXIT FROM THE POLL ROUTINE.
+;
+SEREXIT
+        POP     HL              ; RESTORE HL, BC
+        POP     BC
+
+        RET
+        
+        .ENDC
+        
+        .PAGE
+;*        ENTRY POINT SERSET
+;
+;  THIS ROUTINE SETS THE OPERATING PARAMETERS OF PORT A OR PORT B OF THE 
+;  SCC.  THE TRANSMITTER AND RECEIVER OF THE SPECIFIED PORT ARE
+;  DISABLED WHILE THE PARAMETERS ARE CHANGED, AND THEN RE-ENABLED.
+;;
+;       ENTRY - C CONTAINS 0 FOR PORT A, 1 FOR PORT B;
+;               B CONTAINS THE SCC CLOCK SELECT BYTE;
+;               H CONTAINS THE FIRST MODE CONTROL BYTE;
+;               L CONTAINS THE SECOND MODE CONTROL BYTE;
+;
+;       EXIT -  A AND C MODIFIED;
+;               ALL OTHERS PRESERVED.
+;
+SERSET
+        
+        LD      A,C             ; PORT NUMBER TO A
+        ADD     A,A             ; MULTIPLY BY 8
+        ADD     A,A
+        ADD     A,A
+        ADD     A,CRA           ; NOW POINTS TO CRA OR CRB
+        LD      C,A             ; I/O PORT ADDRESS IN C
+        LD      A,1AH           ; DISABLE TRANSMITTER AND RECEIVER
+        OUT     (C),A
+        
+        DEC     C               ; MAKE C POINT TO MRXA OR MRXB
+        DEC     C
+        OUT     (C),H           ; OUTPUT FIRST MODE WORD
+        OUT     (C),L           ; OUTPUT SECOND MODE WORD
+        
+        INC     C               ; MAKE C POINT TO CSRA OR CSRB
+        OUT     (C),B           ; OUTPUT CLOCK SELECT BYTE
+        
+        INC     C               ; C NOW POINTS BACK TO CRA OR CRB
+        LD      A,05H           ; ENABLE TRANSMITTER AND RECEIVER
+        OUT     (C),A           
+        
+        RET
+        .PAGE
+;*        ENTRY POINT OLDCTL
+;
+;
+OLDCTL
+        RET
+        .PAGE
+;*        ENTRY POINT PTRWRT
+;
+;
+;         ENTRY - CHARACTER IN C REGISTER
+;
+;         EXIT -
+;                A IS ONLY REGISTER USED
+;
+;  NOTE - THIS ROUTINE MUST BE CALLED WITH INTERRUPTS ENABLED.
+;
+PTRWRT
+
+        .IF     ~DDTMON
+        
+        IN      A,(SRB)         ; GET PORT B STATUS
+        BIT     2,A
+        JR      Z,PTRWRT        ; LOOP UNTIL TRANSMITTER READY
+
+        LD      A,C             ; MOVE CHARACTER TO BE SENT
+        OUT     (THRB),A        ; SEND CHARACTER TO PORT B TRANSMITTER
+        
+        LD      A,E_NOERR       ; RETURN CODE OF NO ERROR
+        RET
+
+        .ENDC
+

@@ -1,0 +1,573 @@
+;*        MODULE KEYDRV - KEYBOARD DEVICE DRIVER
+;
+;  THIS MODULE IS A GENERALIZED HARDWARE DEVICE DRIVER
+;  FOR THE INCOTERM KEYBOARD.  IT HAS FIVE ENTRY POINTS: 
+;
+;  KEYSTAT - GET KEYBOARD STATUS.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - IF CHARACTER WAITING, C REGISTER CONTAINS FF.
+;                IF NOT, C REGISTER CONTAINS 00.
+;                A REGISTER CONTAINS E.NOERR.
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYCHAR - INPUT A SINGLE CHARACTER FROM THE KEYBOARD,
+;            WAITING IF NECESSARY.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - CHARACTER IN C REGISTER.
+;                A CONTAINS E.NOERR
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYNECHO - INPUT A SINGLE CHARACTER FROM THE KEYBOARD,
+;             BUT DO NOT ECHO TO THE DISPLAY.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - CHARACTER IN C REGISTER.
+;                A REGISTER CONTAINS E.NOERR
+;                ALL OTHER REGISTERS DESTROYED.
+;
+;  KEYLINE - INPUT A LINE DELIMITED BY A CARRIAGE RETURN TO 
+;            A BUFFER IN MEMORY.  PERFORM INTRA-LINE EDITING
+;            BEFORE RETURNING.
+;
+;       ******  THIS ROUTINE HAS BEEN DELETED TO SAVE SPACE  *****
+;
+;         ENTRY - HL POINTS TO THE BUFFER.
+;                 B CONTAINS THE MAXIMUM SIZE OF THE RETURNED LINE.
+;
+;         EXIT - INPUT LINE IN BUFFER.
+;                CARRIAGE RETURN IS INCLUDED
+;                IN BUFFER, BUT BUFFER CELLS AFTER CR ARE NOT CLEARED.
+;                A REGISTER CONTAINS E.NOERR
+;                ALL REGISTERS USED.
+;
+;  KEYINIT - INITIALIZE THE KEYBOARD HARDWARE AND SOFTWARE. 
+;           ANY CHARACTERS WHICH HAVE BEEN TYPED BUT NOT READ
+;           BY THE USER PROGRAM ARE DISCARDED.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - ALL REGISTERS USED
+;
+;  KEYINTR - PROCESS KEYBOARD INTERRUPT 
+;
+;         ENTRY - AF SAVED ON STACK
+;                 ENTERED VIA A JUMP (NOT A CALL) 
+;
+;         EXIT - RETURNS DIRECTLY TO INTERRUPTED USER PROGRAM
+;
+;  KEYPOLL - POLL KEYBOARD.  THIS ROUTINE SHOULD BE CALLED P ERIODICALLY
+;            WHILE INTERRUPTS ARE DISABLED TO CHECK FOR KEYSTRIKES.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - AF USED
+;                ALL OTHERS PRESERVED
+;
+;
+;  ALL CHARACTERS ARE ECHOED TO THE DISPLAY WHEN READ BY THE
+;  USER PROGRAM, EXCEPT THOSE READ BY KEYNECHO.
+;  A CARRIAGE RETURN IS ECHOED AS A
+;  CARRIAGE RETURN - LINE FEED SEQUENCE.
+;  CANCEL IS ONLY ECHOED IN LINE-INPUT MODE, WHEN IT
+;  APPEARS AS CARRIAGE RETURN - ERASE TO EOL.
+;
+        .PAGE
+;*        DEFINITIONS
+;
+;
+MAXKCNT .EQU    25.             ; TYPE-AHEAD BUFFER SIZE
+
+
+
+;*        STATIC VARIABLES
+;
+;
+KEYFLAGS .EQU    KEYWORK         ; FLAGS (SEE BELOW)
+KEYCNT  .EQU    KEYFLAGS+1      ; BUFFER COUNT
+KEYBUF  .EQU    KEYCNT+1        ; DATA BUFFER
+
+
+
+;*        FLAG REGISTER BIT DEFINITIONS 
+;
+;
+S_LCKUPR .EQU    1               ; LOCK UPPER CASE
+S_NXTCNT .EQU    2               ; NEXT CHARACTER IS CONTROL CHAR
+
+V_LCKUPR .EQU    02H             ; MASK FOR LOCK UPPER FLAG
+        .PAGE
+;*        PSEUDO-CHARACTER TABLE
+;
+;
+PCHTBL
+        .BYTE   5CH             ; CARRIAGE RETURN 
+        .BYTE   21H             ; DELETE LINE
+        .BYTE   5BH             ; BACKSPACE
+
+        .BYTE   67H             ; A1
+        .BYTE   68H             ; B1
+        .BYTE   69H             ; C1
+        .BYTE   64H             ; A2
+        .BYTE   65H             ; B2
+        .BYTE   66H             ; C2
+        .BYTE   61H             ; A3
+        .BYTE   62H             ; B3
+;                                  C3
+        .BYTE   6DH             ; A4
+        .BYTE   6EH             ; B4
+;                                  C4
+
+        .BYTE   13H             ; D1
+        .BYTE   1DH             ; E1
+        .BYTE   12H             ; F1
+        .BYTE   14H             ; D2
+        .BYTE   1EH             ; E2
+        .BYTE   11H             ; F2
+        .BYTE   6BH             ; D3
+        .BYTE   6AH             ; E3
+        .BYTE   6CH             ; F3
+        .BYTE   18H             ; D4
+        .BYTE   6FH             ; E4
+        .BYTE   1CH             ; F4
+        .BYTE   78H             ; SHIFTED B1
+        .BYTE   79H             ; SHIFTED C1
+        .BYTE   03H             ; SHIFTED D1
+        .BYTE   0DH             ; SHIFTED E1
+        .BYTE   02H             ; SHIFTED F1
+        .BYTE   74H             ; SHIFTED A2
+        .BYTE   75H             ; SHIFTED B2
+        .BYTE   76H             ; SHIFTED C2
+        .BYTE   04H             ; SHIFTED D2
+        .BYTE   0EH             ; SHIFTED E2
+        .BYTE   01H             ; SHIFTED F2
+        .BYTE   71H             ; SHIFTED A3
+        .BYTE   72H             ; SHIFTED B3
+        .BYTE   73H             ; SHIFT5D C3
+        .BYTE   7BH             ; SHIFTED D3
+        .BYTE   7AH             ; SHIFTED E3
+        .BYTE   7CH             ; SHIFTED F3
+        .BYTE   08H             ; SHIFTED D4
+        .BYTE   7FH             ; SHIFTED E4
+        .BYTE   0CH             ; SHIFTED F4
+        .BYTE   7DH             ; SHIFTED A4
+        .BYTE   7EH             ; SHIFTED B4
+        .BYTE   70H             ; SHIFTED C4
+PCHEND
+
+L_PCHTBL .EQU    PCHEND-PCHTBL
+
+        .BYTE   CH_CR           ; CARRIAGE RETURN 
+        .BYTE   CH_CAN          ; DELETE LINE
+        .BYTE   CH_BS           ; BACKSPACE (DELETE CHARACTER)
+
+        .BYTE   80H             ; A1
+        .BYTE   CH_US           ; B1
+        .BYTE   CH_ESC          ; C1
+        .BYTE   CH_BS           ; A2
+        .BYTE   84H             ; B2
+        .BYTE   CH_FS           ; C2
+        .BYTE   CH_ACK          ; A3
+        .BYTE   CH_LF           ; B3
+;                                  C3
+        .BYTE   CH_DC3          ; A4
+        .BYTE   CH_HT           ; B4
+;                                  C4
+
+        .BYTE   "!"             ; D1
+        .BYTE   7CH             ; E1
+        .BYTE   07FH            ; F1
+        .BYTE   "["             ; D2
+        .BYTE   "]"             ; E2
+        .BYTE   7EH             ; F2
+        .BYTE   7BH             ; D3
+        .BYTE   7DH             ; E3
+        .BYTE   60H             ; F3
+        .BYTE   "^"             ; D4
+        .BYTE   "\"             ; E4
+        .BYTE   CH_ETX          ; F4
+
+        .BYTE   91H             ; SHIFTED B1
+        .BYTE   92H             ; SHIFTED C1
+        .BYTE   0B0H            ; SHIFTED D1
+        .BYTE   0B1H            ; SHIFTED E1
+        .BYTE   0B2H            ; SHIFTED F1
+        .BYTE   93H             ; SHIFTED A2
+        .BYTE   94H             ; SHIFTED B2
+        .BYTE   95H             ; SHIFTED C2
+        .BYTE   0B3H            ; SHIFTED D2
+        .BYTE   0B4H            ; SHIFTED E2
+        .BYTE   0B5H            ; SHIFTED F2
+        .BYTE   96H             ; SHIFTED A3
+        .BYTE   97H             ; SHIFTED B3
+        .BYTE   98H             ; SHIFTED C3
+        .BYTE   0B6H            ; SHIFTED D3
+        .BYTE   0B7H            ; SHIFTED E3
+        .BYTE   0B8H            ; SHIFTED F3
+        .BYTE   0B9H            ; SHIFTED D4
+        .BYTE   0BAH            ; SHIFTED E4
+        .BYTE   0BBH            ; SHIFTED F4
+        .BYTE   0A9H            ; SHIFTED A4
+        .BYTE   0AAH            ; SHIFTED B4
+        .BYTE   0ABH            ; SHIFTED C4
+
+ADREND  .EQU    $-1 
+        
+        .PAGE
+;*        SUBROUTINE KEYSTAT
+;
+;
+KEYSTAT
+        LD      A,(KEYCNT)      ; GET QUEUE COUNT 
+        AND     A               ; CHECK FOR ZERO
+        JR      Z,NOKY          ; JUMP IF NO DATA AVAILABLE 
+
+        LD      A,0FFH          ; SET UP EXIT CONDITION
+
+NOKY
+        LD      C,A             ; MOVE DATA TO C REGISTER
+
+NOKERR
+        LD      A,E_NOERR       ; NO ERRORS DETECTED
+        RET
+        .PAGE
+;*        SUBROUTINE KEYINIT - INITIALIZE KEYBOARD
+;
+;  CLEAR OUT THE FLAG BYTE IN MEMORY AND CLEAR THE
+;  KEY-STRUCK FLAG IN THE KEYBOARD INTERFACE.
+;
+KEYINIT
+        LD      A,0             ; CLEAR ALL FLAGS 
+        LD      (KEYFLAGS),A
+        LD      (KEYCNT),A      ; CLEAR QUEUE COUNT
+
+        IN      A,(P_KD)        ; CLEAR THE KEY-STRUCK FLAG 
+
+        LD      A,V_ISIKEN      ; ENABLE INTERRUPT ON KEYSTRIKE
+        OUT     (P_IS),A
+
+        RET
+        .PAGE
+;*        ENTRY POINT KEYNECHO - INPUT CHARACTER WITH NO ECHO
+;
+;
+KEYNECHO
+        LD      A,(KEYCNT)      ; GET COUNT OF CHARS IN BUFFER
+        AND     A               ; CHECK FOR ZERO
+        JR      Z,KEYNECHO      ; LOOP IF NO DATA AVAILABLE 
+
+        DEC     A               ; COUNT THE ONE WE'RE REMOVING
+        LD      (KEYCNT),A      ; UPDATE THE COUNT IN MEMORY
+        LD      C,A             ; MOVE COUNT TO C 
+        LD      A,(KEYBUF)      ; GET FIRST CHARACTER ON QUEUE
+        JR      Z,$10        ; JUMP IF QUEUE NOW EMPTY
+
+
+
+        LD      HL,KEYBUF+1     ; MOVE UP KEYBOARD QUEUE
+        LD      DE,KEYBUF
+        LD      B,0             ; COUNT IN BC
+        LDIR
+;
+;  CHECK FOR THE SHIFT KEY BIT, AND REMEMBER IF IT WAS SET. 
+;
+$10
+        LD      D,A             ; MOVE SHIFT FLAG (WITH CHARACTER) TO D
+        AND     7FH             ; CLEAR SHIFT FLAG IN CHARACTER
+;
+;  CHECK FOR CONTROL PREFIX, AND SET THE APPROPRIATE FLAG
+;  IF THAT KEY HAS BEEN HIT.
+;
+        CP      60H             ; KEY C4
+        JR      NZ,$20         ; JUMP IF NOT C4 KEY
+
+        LD      A,(KEYFLAGS)    ; GET FLAGS
+        SET     S_NXTCNT,A
+        LD      (KEYFLAGS),A    ; STORE AWAY FLAGS
+
+        JR      KEYNECHO        ; KEYSTRIKE PROCESSED
+
+
+;
+;  CHECK FOR SHIFT-LOCK KEY, AND TOGGLE THE APPROPRIATE FLAG
+;  IF THAT KEY HAS BEEN HIT.
+;
+$20
+        CP      63H             ; KEY C3
+        JR      NZ,$30        ; JUMP IF NOT C3 KEY
+
+        LD      A,(KEYFLAGS)    ; GET FLAGS
+        XOR     V_LCKUPR        ; TOGGLE FLAG
+        LD      (KEYFLAGS),A    ; STORE AWAY FLAGS
+
+        JP      KEYNECHO        ; KEYSTRIKE PROCESSED
+
+;*
+;
+;  SEARCH THE PSEUDO-CHARACTER TABLE FOR A MATCH WITH THE
+;  STRUCK KEY.  IF A MATCH IS FOUND, SEND OUT THE STRING
+;  CORRESPONDING TO THAT KEY. 
+;
+$30
+        LD      HL,PCHTBL
+        LD      BC,L_PCHTBL     ; LENGTH OF TABLE 
+        CPIR                    ; SEARCH TABLE
+        JR      NZ,$40        ; JUMP IF NOT IN TABLE
+
+        LD      HL,ADREND       ; END OF TABLE
+        AND     A
+        SBC     HL,BC           ; COMPUTE TABLE ADDRESS
+        LD      A,(HL)          ; GET SUBSTITUTED CHARACTER 
+
+        JP      NOKY            ; GO RETURN TO CALLER
+
+
+
+;*
+;  THE CHARACTER IS NOT ONE OF THE SPECIAL CASES, SO IT WILL
+;  BE GIVEN TO THE USER.
+;  IF IT IS ALPHABETIC, WE MUST CHECK FOR CONVERSION MODES FIRST.
+;
+$40
+        CP      CH_A            ; COMPARE TO FIRST ALPHABETIC
+        JP      C,NOKY          ; GO RETURN IF NOT ALPHABETIC
+
+        CP      CH_Z+1          ; COMPARE TO FIRST NON-ALPHABETIC
+        JP      NC,NOKY         ; GO RETURN IF NOT ALPHABETIC
+;
+;  SINCE THE CHARACTER TO BE SENT IS ALPHABETIC, WE MUST
+;  CHECK TO SEE IF A SHIFT-UPPER OR CONTROL PREFIX
+;  KEY WAS HIT BEFORE THIS ONE.  IF SO, WE CHANGE THE
+;  CONVERSION FACTOR CARRIED IN REGISTER C.  THIS FACTOR
+;  DEFAULTS TO +0#20, TO CONVERT THE UPPER-CASE CHARACTERS
+;  GENERATED BY THE KEYBOARD TO LOWER-CASE.
+;
+;
+;  CHECK FOR CONTROL-PREFIX FLAG, AND CHANGE THE CONVERSION 
+;  FACTOR IF IT IS SET.
+;
+        LD      C,20H           ; DEFAULT CONVERSION
+        LD      HL,KEYFLAGS     ; ADDRESS OF FLAGS
+
+        BIT     S_NXTCNT,(HL) 
+        JR      Z,$50        ; JUMP IF NEXT-CONTROL FLAG NOT SET
+
+        RES     S_NXTCNT,(HL)   ; RESET FLAG
+
+        LD      C,-40H          ; LOAD NEW CONVERSION FACTOR
+        JR      $70
+
+;*
+;  CHECK FOR SHIFT-UPPER.
+;
+$50
+        BIT     S_LCKUPR,(HL) 
+        JR      NZ,$60          ; JUMP IF LOCK-UPPER FLAG IS SET
+
+        BIT     7,D             ; SEE IF SHIFT KEY PRESSED
+        JR      NZ,$70       ; JUMP IF SHIFT KEY NOT PRESSED
+
+$60
+        LD      C,0             ; CHANGE CONVERSION FACTOR
+;
+;  REGISTER C NOW CONTAINS THE CONVERSION FACTOR TO BE
+;  APPLIED TO THE ALPHABETIC CHARACTER. 
+;
+$70
+
+        ADD     A,C             ; CONVERT CHARACTER IN A REGISTER
+;
+;  GIVE CHARACTER TO USER.
+;
+        JP      NOKY
+        .PAGE
+;*        SUBROUTINE KEYPOLL - POLL THE KEYBOARD FOR A CHARACTER
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - AF USED
+;
+KEYPOLL
+        IN      A,(P_IS)        ; GET KEYBOARD STATUS
+        BIT     S_ISIKSK,A
+        RET     Z               ; RETURN IF NOTHING THERE
+;
+;  MAKE SURE THAT THERE IS ROOM IN THE QUEUE FOR THIS CHARACTER.
+;
+        PUSH    BC              ; SAVE HL AND BC
+        PUSH    HL
+
+        LD      A,(KEYCNT)      ; GET COUNT OF CHARS IN QUEUE
+        CP      MAXKCNT
+        JR      NZ,KEYRDOK      ; JUMP IF ROOM AVAILABLE
+
+        IN      A,(P_KD)        ; CLEAR KEYBOARD INTERRUPT
+        JR      KPEXIT          ; IGNORE KEYSTRIKE
+
+
+
+;*
+;  UPDATE THE QUEUE COUNT.
+;
+KEYRDOK
+        LD      C,A             ; MOVE OLD COUNT TO C
+        INC     A               ; BUMP CHARACTER COUNT IN A 
+        LD      (KEYCNT),A      ; STORE UPDATED COUNT
+;
+;  PUT THE CHARACTER AT THE END OF THE QUEUE.
+;
+        LD      B,0             ; CLEAR TOP OF BC 
+        LD      HL,KEYBUF       ; ADDRESS OF QUEUE
+        ADD     HL,BC           ; COMPUTE PLACE IN BUFFER
+        IN      A,(P_KD)        ; GET CHARACTER FROM KEYBOARD
+        LD      (HL),A          ; STORE CHARACTER INTO QUEUE
+;
+;  EXIT FROM KEYBOARD POLLER. 
+;
+KPEXIT
+        POP     HL              ; RESTORE HL AND BC
+        POP     BC
+
+        RET
+        .PAGE
+;*        SUBROUTINE KEYINTR - KEYBOARD INTERRUPT HANDLER
+;
+;         ENTRY - AF ON STACK 
+;                 ENTERED VIA A JUMP, NOT A CALL
+;
+;         EXIT - DIRECTLY BACK TO INTERRUPTED USER PROGRAM
+;
+KEYINTR
+        CALL    KEYPOLL         ; GO READ THE KEYBOARD
+        POP     AF              ; RESTORE USER AF 
+        EI
+        RETI
+        .PAGE
+;*        ENTRY POINT KEYCHAR - INPUT AND ECHO CHARACTER
+;
+;
+KEYCHAR
+        CALL    KEYNECHO        ; INPUT CHARACTER 
+
+;
+;  IF CHARACTER IS A FUNCTION KEY CODE, DO NOT TRY TO ECHO
+;  IT TO THE DISPLAY.
+;
+        LD      A,C             ; MOVE CHARACTER TO A
+        CP      80H             ; COMPARE TO FIRST FUNCTION CODE
+        JR      NC,$10      ; JUMP IF A FUNCTION KEY
+
+        PUSH    BC              ; SAVE CHARACTER
+        CALL    DISPCH          ; DISPLAY CHARACTER
+        POP     BC              ; GET CHARACTER BACK INTO A 
+;
+;  IF THE TYPED CHARACTER WAS A CARRIAGE RETURN, WE ADD A
+;  LINE FEED TO ITS ECHO.
+;
+        LD      A,C             ; MOVE CHARACTER TO A
+        CP      CH_CR
+        JP      NZ,NOKERR       ; GO RETURN IF NOT CARRIAGE RETURN
+
+        LD      C,CH_LF         ; OUTPUT A LINE FEED
+        CALL    DISPCH
+
+        LD      C,CH_CR         ; RESTORE CHARACTER THAT WAS TYPED
+
+$10
+        JP      NOKERR          ; GO RETURN TO CALLER
+        .PAGE
+        .IF     0               ; DELETE TO SAVE SPACE
+;*        SUBROUTINE KEYLINE - INPUT LINE WITH INTRA-LINE EDITING
+;
+;
+KEYLINE
+        LD      C,0             ; CLEAR BUFFER CONTENTS COUNT
+;
+;  INPUT ONE CHARACTER AT A TIME, AND PUT IN BUFFER IF NOT
+;  INTRA-LINE EDITING CHARACTER.
+;
+KEYGETCH
+        PUSH    HL              ; SAVE POINTER INTO BUFFER
+        PUSH    BC              ; SAVE REMAINING SPACE COUNTER
+        CALL    KEYCHAR         ; INPUT ONE CHARACTER
+        LD      A,C             ; MOVE CHARACTER TO A
+        POP     BC              ; RESTORE REGISTERS
+        POP     HL
+
+
+        CP      CH_BS
+        JR      Z,KEYBS         ; DELETE CHARACTER EDIT
+
+        CP      CH_CAN
+        JR      Z,KEYCAN        ; DELETE LINE EDIT
+
+        LD      (HL),A          ; PUT CHARACTER INTO BUFFER 
+
+        CP      CH_CR
+        RET     Z               ; RETURN IF END OF LINE
+
+        INC     HL              ; BUMP POINTER
+        INC     C               ; INCREMENT CONTENTS COUNT
+
+        DJNZ    KEYGETCH        ; LOOP IF BUFFER NOT EXHAUSTED
+;
+;  BUFFER HAS BEEN EXHAUSTED.  WE ADJUST THE POINTER AND COUNT
+;  SO THAT SUBSEQUENT CHARACTERS ARE PUT ON TOP OF EACH
+;  OTHER AT THE END OF THE BUFFER, UNTIL THE LINE IS TERMINATED.
+;
+        FALLTHRU KEYBS
+
+
+
+;*
+;  DELETE CHARACTER INTRALINE EDIT CHARACTER HAS BEEN ENTERED.
+;  IF THERE ARE NO CHARACTERS IN THE BUFFER, IGNORE THE TYPE-IN.
+;  OTHERWISE, ADJUST THE POINTER AND COUNTERS APPROPRIATELY.
+;
+KEYBS
+        LD      A,C             ; GET BUFFER COUNT
+        AND     A               ; CHECK FOR ZERO
+        JR      Z,KEYGETCH      ; IGNORE IF NOTHING IN BUFFER
+
+        DEC     HL              ; DECREMENT POINTER
+        DEC     C               ; DECREMENT BUFFER COUNT
+        INC     B               ; INCREMENT SPACE COUNT
+
+        JR      KEYGETCH
+
+
+
+;*
+;  DELETE-LINE INTRALINE EDIT CHARACTER HAS BEEN TYPED IN.
+;  IF THERE IS NOTHING IN THE BUFFER, IGNORE.  OTHERWISE,
+;  DELETE ALL THE CHARACTERS. 
+;
+KEYCAN
+        LD      A,C             ; GET BUFFER CONTENTS COUNT 
+        AND     A               ; TEST FOR ZERO
+        JR      Z,KEYGETCH      ; IGNORE IF NOTHING IN BUFFER
+
+        ADD     A,B             ; COMPUTE ORIGINAL SPACE COUNT
+        LD      D,A             ; SAVE TEMPORARILY IN D
+        LD      B,0             ; CLEAR TOP OF BC 
+        AND     A               ; CLEAR C FLAG
+        SBC     HL,BC           ; RESET POINTER
+
+        LD      B,D             ; RESTORE SPACE COUNT
+        LD      C,0             ; CONTENTS COUNT RETURNS TO ZERO
+
+        PUSH    HL              ; SAVE POINTER INTO BUFFER
+        PUSH    BC              ; SAVE REMAINING SPACE COUNTER
+        LD      C,CH_CR         ; RETURN TO BEGINNIOG OF LINE
+        CALL    DISPCH
+        LD      C,CH_GS         ; ERASE TO EOL
+        CALL    DISPCH
+        POP     BC              ; RESTORE SPACE COUNTERS
+        POP     HL              ; RESTORE POINTER INTO BUFFER
+
+        JP      KEYGETCH        ; LOOP FOR NEXT CHARACTER
+        .ENDC

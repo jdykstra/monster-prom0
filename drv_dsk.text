@@ -1,0 +1,629 @@
+;*        MODULE DISKDRV - DISK I/O DRIVER
+;
+;
+;  DSKINIT - INTIALIZE DISK SUBSYSTEM.  LOADS AND RESETS THE
+;            CONTROLLER.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;  DSKSEEK - PERFORM SEEK.  MAY BE DONE ASYNCHRONOUSLY.
+;
+;       ******  THIS ROUTINE HAS BEEN DELETED TO SAVE SPACE  ******
+;
+;         ENTRY - HL POINTS TO REQUEST BLOCK
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;  DSKRD - READ DISK.  CURRENTLY LIMITED TO SINGLE-SECTOR.
+;          SYNCHRONOUS ONLY.
+;
+;         ENTRY - HL POINTS TO REQUEST BLOCK
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;  DSKWRT - WRITE DISK.  CURRENTLY LIMITED TO SINGLE-SECTOR.
+;           MAY BE DONE ASYNCHRONOUSLY. 
+;
+;         ENTRY - HL POINTS TO REQUEST BLOCK
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;  DSKSTAT - GET STATUS OF ASYNCHRONOUS OPERATION.  WAITS FOR
+;            COMPLETION OF ASYNCHRONOUS OPERATION ON SPECIFIED
+;            UNIT, AND RETURNS ERROR CODE.
+;
+;         ENTRY - HL POINTS TO REQUEST BLOCK
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;  DSKADR - TRANSLATE RELATIVE DISK ADDRESS.
+;
+;         ENTRY - DE CONTAINS THE RELATIVE DISK ADDRESS
+;                 HL POINTS TO REQUEST BLOCK.
+;
+;         EXIT - A CONTAINS ERROR CODE
+;                Z FLAG SET IF NO ERROR 
+;                ALL REGISTERS USED
+;
+;
+;
+;
+;  ON ALL REQUESTS TO THIS MODULE, HL POINTS TO A REQUEST BLOCK
+        
+        
+        
+;*      MODIFICATIONS:
+;
+;  05 Jan 85 - Load firmware via m memory buffer, so that the ROM holding
+;              the firmware can occupy the same address space as the
+;              disk controller window.
+;
+        .PAGE
+;*        ASSEMBLY PARAMETERS 
+;
+;
+DSKWINDW .EQU   0FC00H          ; ADDRESS OF CONTROLLER MEMORY WINDOW
+DSKCWBUF .EQU   08000H          ; BUFFER FOR LOADING CONTROLWARE
+DSKCTLW .EQU    0800H           ; CONTROLWARE ADDRESS
+L_CTLW  .EQU    0400H           ; LENGTH OF FIRMWARE
+
+
+
+;*        DISK FORMAT PARAMETERS
+;
+;
+L_DSKSEC .EQU    128.            ; LENGTH OF SMALL DISK SECTOR
+L_BIGSEC .EQU    512.            ; LENGTH OF BIG DISK SECTOR
+
+
+
+;*        FORMAT OF THE DISK CONTROLLER MEMORY WINDOW
+;
+;
+DCNTFUN .EQU    DSKWINDW        ; FUNCTION CODE
+DCNTERR .EQU    DCNTFUN+1       ; ERROR CODE
+DCNTADR .EQU    DCNTERR+1       ; START OF ADDRESS INFO
+DCNTBUF .EQU    DSKWINDW+10H    ; DATA BUFFER
+
+
+
+;*        DISK WINDOW FORMAT
+;
+;
+C_DWUNIT .EQU    2               ; UNIT NUMBER
+C_DWRES .EQU    9               ; RESERVED BYTE
+
+
+
+;*        FUNCTION CODES FOR CONTROLLER 
+;
+;
+SEEKONLY .EQU    01H             ; DO SEEK ONLY
+WRTSEC  .EQU    02H             ; WRITE SECTOR
+RDSEC   .EQU    03H             ; READ SECTOR
+NOOP    .EQU    0               ; NO OPERATION
+
+
+
+;*        FORMAT OF THE REQUEST BLOCK
+;
+;
+S_DSKASY .EQU    7               ; ASYNCHRONOUS BIT IN FLAG BYTE
+
+
+
+;*        STATIC VARIABLES
+;
+;
+
+
+
+;*        DISK FORMAT TABLE
+;
+;
+C_FMTFLG .EQU    0               ; FLAG BYTES
+S_FMTSK0 .EQU    0               ; SKIP TRACK 0
+V_FMTSK0 .EQU    1
+S_FMTSC1 .EQU    1               ; 1 BLOCK PER SECTOR
+V_FMTSC1 .EQU    2
+S_FMTIN6 .EQU    2               ; INTERLACE=6
+V_FMTIN6 .EQU    4
+S_FMTOF0 .EQU    3               ; OFFSET = 0
+V_FMTOF0 .EQU    8
+S_FMTOF2 .EQU    4               ; OFFSET = 2
+V_FMTOF2 .EQU    10H
+S_FMTBGS .EQU    5               ; USES BIG SECTORS
+V_FMTBGS .EQU    20H
+
+LE_FMT  .EQU    1               ; ENTRY LENGTH
+        .PAGE
+;*        DSKSEEK ENTRY POINT 
+;
+;
+        .IF     0
+        
+DSKSEEK
+        CALL    FNDMAP          ; FIND MAPPING ENTRY
+        CALL    GETDCONT        ; GET DISK CONTROLLER
+
+        CALL    COPYINFO        ; PASS INFO TO CONTROLLER
+
+        LD      A,SEEKONLY      ; FUNCTION CODE FOR CONTROLLER
+        LD      (DCNTFUN),A
+
+        CALL    WAKCONT         ; WAKE UP CONTROLLER
+
+        JR      CHKASYN
+        
+        .ENDC
+        .PAGE
+;*        DSKWRT ENTRY POINT
+;
+;
+DSKWRT
+        CALL    FNDMAP          ; FIND MAPPING ENTRY
+
+        CALL    GETDCONT        ; GET DISK CONTROLLER
+
+        CALL    COPYINFO        ; PASS ADDRESS INFO TO CONTROLLER
+;
+;  COPY DATA FROM USER BUFFER TO CONTROLLER BUFFER.
+;
+        LD      E,(HL)          ; GET BUF ADR FROM REQUEST BLOCK
+        INC     HL
+        LD      D,(HL)          ; HIGH PART OF ADDRESS
+        EX      DE,HL           ; MOVE BUF ADDRESS TO HL
+
+        LD      DE,DCNTBUF      ; ADDRESS OF CONTROLLER BUFFER
+
+        LD      BC,L_BIGSEC     ; ASSUME LARGE SECTOR SIZE
+        BIT     S_FMTBGS,(IX+C_FMTFLG)
+        JR      NZ,DSKWRT1      ; JUMP IF BIG SECTOR
+
+        LD      BC,L_DSKSEC     ; SIZE OF SMALL SECTOR
+
+DSKWRT1
+        LDIR
+;
+;  START UP CONTROLLER, AND GO CHECK THE ASYNCHRONOUS
+;  PARAMETER IN THE REQUEST BLOCK.
+;
+        LD      A,WRTSEC        ; FUNCTION CODE FOR CONTROLLER
+        LD      (DCNTFUN),A
+
+        CALL    WAKCONT         ; START UP CONTROLLER
+
+;
+;  CHECK THE ASYNCHRONOUS PARAMETER IN THE REQUEST BLOCK.  IF IT
+;  IS NOT SET, WAIT FOR THIS OPERATION TO BE COMPLETED BY THE
+;  CONTROLLER, AND PASS THE ERROR CODE BACK TO THE USER.
+;
+CHKASYN
+        LD      A,E_NOERR       ; ASSUME NO ERROR IF ASYNCHRONOUS
+
+        BIT     S_DSKASY,(IY+C_DRQFLG)
+        RET     NZ              ; RETURN IF ASYNCHRONOUS
+;
+;  WAIT FOR OPERATION TO BE COMPLETED BY CONTROLLER.
+;
+DSKCHK
+        CALL    GETDCONT        ; WAIT FOR AND GET CONTROLLER
+;
+;  RETURN CONTROLLER ERROR CODE TO THE USER.
+;
+DSKEXIT
+        PUSH    IY              ; PUT REQ BLK POINTER IN DE 
+        POP     DE
+        CALL    PUTINFO         ; UPDATE ADDRESS INFO IN REQ BLK
+        LD      A,(DCNTERR)     ; GET ERROR CODE
+        LD      L,A             ; TEMPORARILY SAVE IT IN L
+
+        CALL    RLSCONT         ; RELEASE DISK CONTROLLER
+
+        LD      A,L             ; MOVE ERROR CODE TO A
+        AND     A               ; SET Z FLAG APPROPRIATELY
+        RET
+        .PAGE
+;*        DSKRD ENTRY POINT
+;
+;
+DSKRD
+        CALL    FNDMAP          ; FIND MAPPING ENTRY
+
+        CALL    GETDCONT        ; GET DISK CONTROLLER
+
+        CALL    COPYINFO        ; PASS ADDRESS INFO TO CONTROLLER
+
+        LD      A,RDSEC         ; FUNCTION CODE FOR CONTROLLER
+        LD      (DCNTFUN),A
+
+        CALL    WAKCONT         ; START UP CONTROLLER
+;
+;  WAIT FOR OPERATION DONE, AND THEN COPY THE DATA FROM THE 
+;  CONTROLLER BUFFER TO THE USER BUFFER.
+;
+        CALL    GETDCONT        ; WAIT FOR AND GET CONTROLLER
+
+        LD      E,(HL)          ; GET USER BUF ADR FROM REQUEST BLOCK 
+        INC     HL
+        LD      D,(HL)          ; HIGH PART OF ADDRESS
+
+        LD      HL,DCNTBUF      ; CONTROLLER BUFFER ADDRESS 
+
+        LD      BC,L_BIGSEC     ; ASSUME LARGE SECTOR SIZE
+        BIT     S_FMTBGS,(IX+C_FMTFLG)
+        JR      NZ,DSKRD1       ; JUMP IF BIG SECTOR
+
+        LD      BC,L_DSKSEC     ; SIZE OF SMALL SECTOR
+
+DSKRD1
+        LDIR
+
+        JP      DSKEXIT         ; GO GET ERROR CODE
+        .PAGE
+;*        DSKSTAT ENTRY POINT 
+;
+;
+DSKSTAT
+        CALL    FNDMAP          ; FIND MAPPING ENTRY
+
+        CALL    GETDCONT        ; GET DISK CONTROLLER
+
+        JP      DSKEXIT         ; GO RETURN ERROR CODE
+        .PAGE
+;*        ENTRY POINT DSKINIT - INITIALIZE DISK SUBSYSTEM
+;
+;  DSKINIT LOADS THE CONTROLLER WITH ITS FIRMWARE.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - A CONTAINS ERROR CODE
+;
+DSKINIT
+;
+;  MOVE THE FIRMWARE FROM ROM INTO A BUFFER AREA IN MEMORY.
+;  SINCE THE DISK CONTROLLER COMES UP AFTER A RESET WITH ITS WINDOW
+;  MAPPED INTO THE ADDRESS SPACE, WE HAVE TO REMOVE IT TO GET TO 
+;  THE PROM.
+;
+        LD      A,76H           ; PUT HALT IN CONTROLLER LOC 0000
+        LD      (DSKWINDW),A
+        XOR     A
+        OUT     (P_DC),A        ; REMOVE DISK WINDOW FROM ADDRESS SPACE
+        
+        LD      HL,DSKCTLW      ; ADDRESS OF FIRMWARE
+        LD      DE,DSKCWBUF     ; BUFFER ADDRESS
+        LD      BC,L_CTLW       ; LENGTH OF FIRMWARE
+        LDIR
+;
+;  CONNECT THE CONTROLLER AND MAP THE CODE AREA OF ITS
+;  MEMORY INTO THE WINDOW.
+;
+        LD      A,V_DCOWEN
+        OUT     (P_DC),A
+;
+;  LOAD THE FIRMWARE FROM THE MEMORY BUFFER INTO THE CONTROLLER MEMORY.
+;
+        LD      HL,DSKCWBUF    ; ADDRESS OF FIRMWARE
+        LD      DE,DSKWINDW     ; WINDOW ADDRESS
+        LD      BC,L_CTLW       ; LENGTH OF FIRMWARE
+        LDIR
+;
+;  START THE CONTROLLER FOR INITIALIZATION.
+;
+        LD      A,V_DCORST      ; RELEASE AND RESET CONTROLLER
+        OUT     (P_DC),A
+
+DSKINITA
+        IN      A,(P_DC)        ; LOOP UNTIL CONTROLLER INITIALIZED
+        BIT     S_DCIRUN,A
+        JR      NZ,DSKINITA
+
+        JP      DSKEXIT         ; GO RETURN ERROR CODE TO CALLER
+        .PAGE
+;*        ENTRY POINT DSKADR - CONVERT DISK ADDRESS
+;
+;         ENTRY - HL POINTS TO DISK REQUEST BLOCK 
+;                 DE CONTAINS DESIRED BLOCK NUMBER
+;
+;         EXIT - CONVERTED ADDRESS INSERTED INTO REQUEST BLOCK
+;                A REGISTER SET TO ZERO 
+;                Z FLAG SET
+;
+DSKADR
+        CALL    FNDMAP          ; FIND MAPPING ENTRY
+;
+;  BEGIN THE CONVERSION BY DIVIDING THE BLOCK NUMBER BY THE 
+;  NUMBER OF BLOCKS IN A SECTOR.
+;
+        EX      DE,HL           ; MOVE BLOCK NUMBER TO HL
+        BIT     S_FMTSC1,(IX+C_FMTFLG)
+        JR      NZ,FMT1         ; JUMP IF ONE BLOCK PER SECTOR
+
+        SRA     H               ; DIVIDE HL BY 4
+        RR      L
+        SRA     H
+        RR      L
+
+        LD      BC,32.          ; 32 SECTORS PER CYLINDER
+        JR      FMT7
+
+
+
+;*
+;
+;  CS IS THE NUMBER OF SECTORS PER CYLINDER, AND IS KEPT
+;  IN REGISTER BC.
+;  DIVIDE BY CS.  THIS RESULTS IN DE = N1 DIV CS, HL = N1 MOD CS.
+;
+FMT1
+        LD      BC,26.          ; DIVISOR
+
+FMT7
+        CALL    DIV             ; PERFORM DIVISION
+        LD      (IY+C_DRQTRK),E ; STORE TRACK NUMBER
+;
+;  SOME FORMATS SKIP TRACK 0.  SEE IF THIS IS ONE OF THEM.
+;
+        BIT     S_FMTSK0,(IX+C_FMTFLG)
+        JR      Z,FMT4          ; JUMP IF DON'T SKIP 0
+
+        INC     (IY+C_DRQTRK) 
+;
+;  COMPUTE S0, THE STARTING SECTOR OF THE CURRENT LOGICAL TRACK.
+;  SO = ( T * OFS ) MOD CS + ADJ, WHERE OFS IS THE OFFSET.
+;
+FMT4
+        PUSH    HL              ; SAVE N1 MOD CS
+        LD      D,0             ; ASSUME OFFSET = 0
+        BIT     S_FMTOF0,(IX+C_FMTFLG)
+        JR      NZ,FMT3         ; JUMP IF OFFSET = 0
+
+        LD      L,E             ; MOVE T TO HL (ASSUME T < 256)
+        ADD     HL,HL           ; T * 2 
+        BIT     S_FMTOF2,(IX+C_FMTFLG)
+        JR      NZ,FMT5         ; JUMP IF OFFSET = 2
+
+        ADD     HL,HL           ; T * 4 
+        ADD     HL,DE           ; * 5
+        ADD     HL,DE           ; * 6
+
+FMT5
+        CALL    DIV             ; BC STILL CONTAINS CS
+;
+        LD      D,L             ; MOVE (T*OFS) MOD CS TO D
+
+FMT3
+        POP     HL              ; RESTORE N1 MOD CS TO L
+;
+;  COMPUTE THE ADJUSTMENT FACTOR.
+;  ADJ = 1 IF N1 MOD CS .LT. ( CS DIV 2 )
+;  ADJ = 2 IF N1 MOD CS .GE. ( CS DIV 2 )
+;
+        LD      A,L             ; MOVE REMAINDER TO A
+        LD      E,C             ; MOVE CS TO E
+        SRA     E               ; CS DIV 2
+        INC     D               ; ASSUME ADJ = 1
+        CP      E
+        JR      C,FMT2          ; JUMP IF .LE. 12 
+
+        INC     D               ; ADJ = 2
+
+FMT2
+        LD      (IY+C_DRQS0),D  ; STORE INTO REQUEST BLOCK
+;
+;  START COMPUTING THE BEGINNING SECTOR NUMBER.
+;  WE ALREADY HAVE N1 MOD CS IN A AND L, SO MULTIPLY
+;  IT BY THE INTERLACE FACTOR.
+;
+        ADD     A,A             ; * 2
+
+        BIT     S_FMTIN6,(IX+C_FMTFLG)
+        JR      Z,FMT6          ; JUMP IF INTERLACE = 2
+
+        ADD     A,A             ; *  4
+        ADD     A,L             ; * 5
+        ADD     A,L             ; * 6
+;
+;  COMPUTE ((N1 MOD CS) *INT) + S0 -1.
+;
+FMT6
+        ADD     A,D             ; ADD IN S0
+        DEC     A               ; SUBTRACT ONE
+;
+;  FINISH COMPUTING SECTOR ADDRESS.
+;  S = ((( N1 MOD CS ) * INT ) + S0 - 1 ) MOD CS + 1
+;
+        LD      L,A             ; H, BC ALREADY SET
+        CALL    DIV             ; DO DIVIDE/MOD
+        INC     L               ; ADD ONE
+        LD      (IY+C_DRQSEC),L ; PUT INTO REQUEST BLOCK
+
+        XOR     A               ; SET Z FLAG, CLEAR A REG
+
+        RET
+        .PAGE
+;*        MAPPING TABLE
+;
+;
+FMTTBL
+        .BYTE   0               ; MAPPING CODE 0 UNASSIGNED 
+        .BYTE   V_FMTSC1+V_FMTOF0+V_FMTIN6 ; CP/M 
+        .BYTE   V_FMTSC1+V_FMTSK0 ; UCSD STANDARD 
+        .BYTE   V_FMTOF2+V_FMTBGS ; OPTIMIZED
+        .PAGE
+;*        SUBROUTINE FNDMAP - FIND MAPPING ENTRY IN TABLE
+;
+;         ENTRY - REQUEST BLOCK POINTER IN HL
+;
+;         EXIT - REQUEST BLOCK POINTER IN IY
+;                MAPPING ENTRY POINTER IN IX
+;               REGISTERS A, B AND C USED.
+;
+FNDMAP
+        PUSH    HL              ; MOVE REQUEST BLOCK ADR TO IY
+        POP     IY
+;
+;  LOCATE THE PROPER ENTRY IN THE MAPPING TABLE.
+;
+        LD      A,(IY+C_DRQMAP) ; GET BYTE WITH MAPPING CODE
+        AND     V_DRQMAP
+        ASSUME  S_DRQMAP,EQ,4 
+        ASSUME  LE_FMT,EQ,1
+        SRA     A               ; SHIFT CODE RIGHT 4 BITS
+        SRA     A
+        SRA     A
+        SRA     A
+        LD      C,A             ; MOVE TABLE OFFSET TO BC
+        LD      B,0 
+        LD      IX,FMTTBL       ; ADR OF TABLE
+        ADD     IX,BC           ; COMPUTE ENTRY ADDRESS
+
+        RET
+        .PAGE
+;*        SUBROUTINE GETDCONT - GET DISK CONTROLLER
+;
+;  THIS SUBROUTINE WAITS UNTIL THE DISK CONTROLLER IS IDLE, 
+;  AND THEN CONNECTS IT TO THE PROCESSOR.
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - DISK CONTROLLER CONNECTED
+;                A REGISTER USED, ALL OTHERS PRESERVED.
+;
+GETDCONT
+;
+;  FIRST, WAIT FOR CONTROLLER TO STOP RUNNING.
+;
+RUNWAIT
+        IN      A,(P_DC)        ; GET CONTROLLER STATUS
+        BIT     S_DCIRUN,A
+        JR      NZ,RUNWAIT      ; LOOP UNTIL STOPPED
+;
+;  SWITCH THE CONTROLLER MEMORY WINDOW INTO
+;  THE LOCAL PROCESSOR ADDRESS SPACE.
+;
+        LD      A,V_DCOWEN      ; ENABLE WINDOW
+        OUT     (P_DC),A
+
+        LD      A,V_DCOWEN+V_DCOIAS ; SELECT COMMUNICATION BLOCK
+        OUT     (P_DC),A
+
+        RET
+        .PAGE
+;*        SUBROUTINE COPYINFO - COPY INFO FROM USER TO CONTROLLER
+;
+;         ENTRY - HL POINTS TO USER REQUEST BLOCK 
+;
+;         EXIT -   HL POINTS TO BYTE AFTER FLAGS IN BLOCK
+;                  BC, DE REGISTERS USED
+;
+COPYINFO
+        LD      DE,DCNTADR      ; ADR OF INFO IN WINDOW
+        LD      BC,C_DWRES-C_DWUNIT+1 ; LENGTH OF TRANSFER
+
+        LDIR
+
+        RET
+        .PAGE
+;*        SUBROUTINE PUTINFO - UPDATE USER'S REQUEST BLOCK
+;
+;         ENTRY - DE POINTS TO USER REQUEST BLOCK 
+;
+;         EXIT - HL,BC,DE REGISTERS USED
+;
+PUTINFO
+        LD      HL,DCNTADR      ; ADDRESS OF NEW INFO IN WINDOW
+        LD      BC,C_DWRES-C_DWUNIT+1 ; LENGTH OF TRANSFER
+
+        LDIR
+
+        RET
+        .PAGE
+;*        SUBROUTINE RLSCONT - RELEASE CONTROLLER 
+;
+;  THIS SUBROUTINE SWITCHES THE CONTROLLER WINDOW OUT OF
+;  PROCESSOR MEMORY SPACE.
+;
+;         ENTRY - CONTROLLER CONNECTED TO PROCESSOR
+;                 NO PARAMETERS
+;
+;         EXIT - CONTROLLER RELEASED
+;                A USED, ALL OTHERS PRESERVED
+;
+RLSCONT
+;
+;  RELEASE CONTROLLER.
+;
+        LD      A,0             ; RELEASE CONTROLLER
+        OUT     (P_DC),A
+
+        RET
+        .PAGE
+;*        SUBROUTINE WAKCONT - RELEASE AND WAKE UP CONTROLLER
+;
+;         ENTRY - CONTROLLER CONNECTED TO PROCESSOR
+;                 NO PARAMETERS
+;
+;         EXIT - CONTROLLER RELEASED AND STARTED
+;                A USED, ALL OTHERS PRESERVED.
+;
+WAKCONT
+        LD      A,V_DCOIAS      ; RELEASE AND INTERRUPT CONTROLLER
+        OUT     (P_DC),A
+
+        RET
+        .PAGE
+;*        SUBROUTINE DIV - DIVIDE TWO POSITIVE 16-BIT INTEGERS
+;
+;  THIS ROUTINE IS BORROWED FROM THE UCSD Z80 INTERPRETER.
+;
+;         ENTRY - HL CONTAINS DIVIDEND
+;                 BC CONTAINS DIVISOR
+;
+;         EXIT - DE CONTAINS QUOTIENT
+;                HL CONTAINS REMAINDER
+;                BC STILL CONTAINS DIVISOR
+;                A REGISTER ALSO USED
+;
+DIV
+        LD      DE,0000         ; CLEAR QUOTIENT
+        LD      A,1             ; INITIALIZE POSITION COUNTER
+
+DIV1
+        INC     A               ; BUMP POSITION COUNTER
+        SLA     C               ; SHIFT BC LEFT ONE BIT
+        RL      B
+        JP      P,DIV1          ; LOOP IF C BIT NOT SET
+
+DIV2
+        SCF                     ; SET C BIT
+        RL      E               ; INSERT BIT INTO DE
+        RL      D
+        SBC     HL,BC
+        JR      NC,DIV3         ; JUMP IF C BIT NOT SE
+
+        ADD     HL,BC
+        DEC     DE
+
+DIV3
+        SRL     B               ; SHIFT BC RIGHT ONE BIT
+        RR      C
+        DEC     A               ; DECREMENT POSITION COUNTER
+        JR      NZ,DIV2         ; JUMP IF  MORE TO GO
+
+        RL      C               ; ROTATE BC LEFT ONE BIT
+        RL      B
+        RET

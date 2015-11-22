@@ -1,0 +1,444 @@
+;
+;  LISTING CONTROL
+;
+        .NOMACROLIST
+        
+        .IF     LISTINC=0
+        .NOLIST
+        .ENDC
+
+P_BS      .EQU       0H
+P_DC      .EQU      40H
+P_DT      .EQU       7H
+P_IS      .EQU      20H
+P_KD      .EQU      21H
+P_MC      .EQU       0H
+P_MI      .EQU       1H
+P_SC      .EQU       4H
+P_SD      .EQU      22H
+P_SE      .EQU       6H
+P_SS      .EQU      23H
+P_TK      .EQU       5H
+        
+P_RESET .EQU    0
+P_NMI   .EQU    66H
+P_RST0  .EQU    0
+P_RST16 .EQU    16.
+P_RST24 .EQU    24.
+P_RST32 .EQU    32.
+P_RST40 .EQU    40.
+P_RST48 .EQU    48.
+P_RST56 .EQU    56.
+P_RST8  .EQU    8.
+
+
+        .MACRO  DEF_MPU
+;  C_DCIMAD  .EQU       0H 
+;  C_DCIRUN  .EQU       0H 
+;  C_DCOIAS  .EQU       0H 
+;  C_DCORST  .EQU       0H 
+;  C_DCOWEN  .EQU       0H 
+;  C_ISIHEN  .EQU       0H 
+;  C_ISIHRT  .EQU       0H 
+;  C_ISIKEN  .EQU       0H 
+;  C_ISIKSK  .EQU       0H 
+;  C_ISOBEL  .EQU       0H 
+;  C_ISOHEN  .EQU       0H 
+;  C_ISOHRT  .EQU       0H 
+;  C_ISOKEN  .EQU       0H 
+;  C_MCINEM  .EQU       0H 
+;  C_MCINIE  .EQU       0H 
+;  C_MCOCNM  .EQU       0H 
+;  C_MCONIE  .EQU       0H 
+;  C_MIILV0  .EQU       0H 
+;  C_MIILV1  .EQU       0H 
+;  C_MIILV2  .EQU       0H 
+;  C_MIILV3  .EQU       0H 
+;  C_MIILV4  .EQU       0H 
+;  C_MIILV5  .EQU       0H 
+;  C_MIILV6  .EQU       0H 
+;  C_MIILV7  .EQU       0H 
+;  C_MIOLV0  .EQU       0H 
+;  C_MIOLV1  .EQU       0H 
+;  C_MIOLV2  .EQU       0H 
+;  C_MIOLV3  .EQU       0H 
+;  C_MIOLV4  .EQU       0H 
+;  C_MIOLV5  .EQU       0H 
+;  C_MIOLV6  .EQU       0H 
+;  C_MIOLV7  .EQU       0H 
+;  C_SSIFRM  .EQU       0H 
+;  C_SSIOVR  .EQU       0H 
+;  C_SSIPAR  .EQU       0H 
+;  C_SSIRFL  .EQU       0H 
+;  C_SSITDN  .EQU       0H 
+;  C_SSITRD  .EQU       0H 
+;  C_SSITRM  .EQU       0H 
+;  C_SSOBDR  .EQU       0H 
+;  C_SSOBRK  .EQU       0H 
+;  C_SSOCHR  .EQU       0H 
+;  C_SSOCTS  .EQU       0H 
+;  C_SSOERR  .EQU       0H 
+;  C_SSOIEN  .EQU       0H 
+;  C_SSOPAR  .EQU       0H 
+;  C_SSOPEN  .EQU       0H 
+;  C_SSOREN  .EQU       0H 
+;  C_SSORST  .EQU       0H 
+;  C_SSOSTP  .EQU       0H 
+;  C_SSOTEN  .EQU       0H 
+SSOBDR12  .EQU       2H
+SSOBDR30  .EQU       3H
+;  SSOCHR5B  .EQU       0H
+;  SSOCHR6B  .EQU       4H
+SSOCHR7B  .EQU      08H
+SSOCHR8B  .EQU      0CH
+SSOPAREV  .EQU      20H
+;  SSOPAROD  .EQU       0H
+SSOSTP1B  .EQU     040H
+;  SSOSTP15  .EQU     080H
+;  SSOSTP2   .EQU     0C0H
+;  S_DCIMAD  .EQU       1H
+S_DCIRUN  .EQU       0H
+;  S_DCOIAS  .EQU       1H
+;  S_DCORST  .EQU       7H
+;  S_DCOWEN  .EQU       0H
+;  S_ISIHEN  .EQU       7H
+;  S_ISIHRT  .EQU       3H
+;  S_ISIKEN  .EQU       6H
+S_ISIKSK  .EQU       2H
+;  S_ISOBEL  .EQU       0H
+;  S_ISOHEN  .EQU       7H
+;  S_ISOHRT  .EQU       3H
+;  S_ISOKEN  .EQU       6H
+;  S_MCINEM  .EQU       3H
+;  S_MCINIE  .EQU       7H
+;  S_MCOCNM  .EQU       3H
+;  S_MCONIE  .EQU       7H
+;  S_MIILV0  .EQU       0H
+;  S_MIILV1  .EQU       1H
+;  S_MIILV2  .EQU       2H
+;  S_MIILV3  .EQU       3H
+;  S_MIILV4  .EQU       4H
+;  S_MIILV5  .EQU       5H
+;  S_MIILV6  .EQU       6H
+;  S_MIILV7  .EQU       7H
+;  S_MIOLV0  .EQU       0H
+;  S_MIOLV1  .EQU       1H
+;  S_MIOLV2  .EQU       2H
+;  S_MIOLV3  .EQU       3H
+;  S_MIOLV4  .EQU       4H
+;  S_MIOLV5  .EQU       5H
+;  S_MIOLV6  .EQU       6H
+;  S_MIOLV7  .EQU       7H
+;  S_SSIFRM  .EQU       5H
+;  S_SSIOVR  .EQU       4H
+;  S_SSIPAR  .EQU       3H
+S_SSIRFL  .EQU       1H
+S_SSITDN  .EQU       2H
+S_SSITRD  .EQU       0H
+S_SSITRM  .EQU       7H 
+;  S_SSOBDR  .EQU       0H 
+;  S_SSOBRK  .EQU       3H 
+;  S_SSOCHR  .EQU       2H 
+;  S_SSOCTS  .EQU       1H 
+;  S_SSOERR  .EQU       4H 
+;  S_SSOIEN  .EQU       5H 
+;  S_SSOPAR  .EQU       5H 
+;  S_SSOPEN  .EQU       4H 
+;  S_SSOREN  .EQU       2H 
+;  S_SSORST  .EQU       6H 
+;  S_SSOSTP  .EQU       6H 
+;  S_SSOTEN  .EQU       0H 
+;  V_DCIMAD  .EQU      0EH
+;  V_DCIRUN  .EQU       1H
+V_DCOIAS  .EQU       2H
+V_DCORST  .EQU     080H
+V_DCOWEN  .EQU       1H
+;  V_ISIHEN  .EQU     080H
+;  V_ISIHRT  .EQU      08H
+V_ISIKEN  .EQU     040H
+V_ISIKSK  .EQU       4H
+;  V_ISOBEL  .EQU       1H
+;  V_ISOHEN  .EQU     080H
+;  V_ISOHRT  .EQU      08H
+;  V_ISOKEN  .EQU     040H
+;  V_MCINEM  .EQU      08H
+;  V_MCINIE  .EQU     080H
+;  V_MCOCNM  .EQU      08H
+;  V_MCONIE  .EQU     080H
+;  V_MIILV0  .EQU       1H
+;  V_MIILV1  .EQU       2H
+;  V_MIILV2  .EQU       4H
+;  V_MIILV3  .EQU      08H
+;  V_MIILV4  .EQU      10H
+;  V_MIILV5  .EQU      20H
+;  V_MIILV6  .EQU     040H
+;  V_MIILV7  .EQU     080H
+;  V_MIOLV0  .EQU       1H
+;  V_MIOLV1  .EQU       2H
+;  V_MIOLV2  .EQU       4H
+V_MIOLV3  .EQU      08H
+V_MIOLV4  .EQU      10H
+;  V_MIOLV5  .EQU      20H
+V_MIOLV6  .EQU     040H
+;  V_MIOLV7  .EQU     080H
+V_SSIFRM  .EQU      20H 
+V_SSIOVR  .EQU      10H 
+V_SSIPAR  .EQU      08H 
+;  V_SSIRFL  .EQU       2H 
+;  V_SSITDN  .EQU       4H 
+;  V_SSITRD  .EQU       1H 
+;  V_SSITRM  .EQU     080H 
+;  V_SSOBDR  .EQU       3H 
+V_SSOBRK  .EQU      08H 
+;  V_SSOCHR  .EQU      0AH
+V_SSOCTS  .EQU       2H
+V_SSOERR  .EQU      10H
+V_SSOIEN  .EQU      20H
+;  V_SSOPAR  .EQU      20H
+V_SSOPEN  .EQU      10H
+V_SSOREN  .EQU       4H
+V_SSORST  .EQU     040H
+;  V_SSOSTP  .EQU     0C0H
+V_SSOTEN  .EQU       1H
+        .ENDM
+        
+        .MACRO  DEF_DSK
+C_BSIDTY  .EQU       0H 
+C_BSIEXI  .EQU       0H 
+C_BSIINT  .EQU       0H 
+C_BSINWF  .EQU       0H 
+C_BSISW1  .EQU       0H 
+C_BSISW2  .EQU       0H 
+C_BSITEX  .EQU       0H 
+C_BSITST  .EQU       0H 
+C_BSODDN  .EQU       0H 
+C_BSOEXO  .EQU       0H 
+C_BSOPCT  .EQU       0H 
+C_BSOSEL  .EQU       0H 
+C_BSOSID  .EQU       0H 
+C_BSOUNT  .EQU       0H 
+C_SCIBSY  .EQU       0H 
+C_SCICRC  .EQU       0H 
+C_SCIDRQ  .EQU       0H 
+C_SCIHDL  .EQU       0H 
+C_SCIIND  .EQU       0H 
+C_SCILDT  .EQU       0H 
+C_SCINRD  .EQU       0H 
+C_SCIPRT  .EQU       0H 
+C_SCIRCT  .EQU       0H 
+C_SCIRNF  .EQU       0H 
+C_SCISKE  .EQU       0H 
+C_SCITK0  .EQU       0H 
+C_SCIWRF  .EQU       0H 
+C_SCOCMD  .EQU       0H 
+C_SCODEL  .EQU       0H 
+C_SCODLY  .EQU       0H 
+C_SCOHDL  .EQU       0H 
+C_SCOIDX  .EQU       0H 
+C_SCOIMM  .EQU       0H 
+C_SCOINR  .EQU       0H 
+C_SCOIRN  .EQU       0H 
+C_SCORAT  .EQU       0H 
+C_SCOSCP  .EQU       0H 
+C_SCOSSL  .EQU       0H 
+C_SCOVER  .EQU       0H 
+SCOFRCIN  .EQU     0D0H
+SCORDADR  .EQU     0C0H
+SCORDSCM  .EQU     090H
+SCORDSCS  .EQU     080H
+SCORDTRK  .EQU     0E0H
+SCORESTR  .EQU       0H
+SCORT10   .EQU      08H
+SCORT15   .EQU      0CH
+SCORT3    .EQU       0H
+SCORT6    .EQU       4H
+SCOSEEK   .EQU      10H
+SCOSTEPN  .EQU      20H
+SCOSTEPU  .EQU      30H
+SCOSTINN  .EQU     040H
+SCOSTINU  .EQU     050H
+SCOSTOTN  .EQU     060H
+SCOSTOTU  .EQU     070H
+SCOWRSCM  .EQU     0B0H
+SCOWRSCS  .EQU     0A0H
+SCOWRTRK  .EQU     0F0H
+S_BSIDTY  .EQU       6H
+S_BSIEXI  .EQU       4H
+S_BSIINT  .EQU       3H
+S_BSINWF  .EQU       7H
+S_BSISW1  .EQU       1H
+S_BSISW2  .EQU       0H
+S_BSITEX  .EQU       5H
+S_BSITST  .EQU       2H
+S_BSODDN  .EQU       4H
+S_BSOEXO  .EQU       3H
+S_BSOPCT  .EQU       6H
+S_BSOSEL  .EQU       2H
+S_BSOSID  .EQU       5H
+S_BSOUNT  .EQU       0H
+S_SCIBSY  .EQU       0H
+S_SCICRC  .EQU       3H
+S_SCIDRQ  .EQU       1H
+S_SCIHDL  .EQU       5H
+S_SCIIND  .EQU       1H
+S_SCILDT  .EQU       2H
+S_SCINRD  .EQU       7H
+S_SCIPRT  .EQU       6H
+S_SCIRCT  .EQU       5H
+S_SCIRNF  .EQU       4H
+S_SCISKE  .EQU       4H
+S_SCITK0  .EQU       2H
+S_SCIWRF  .EQU       5H
+S_SCOCMD  .EQU       4H
+S_SCODEL  .EQU       0H
+S_SCODLY  .EQU       2H
+S_SCOHDL  .EQU       3H
+S_SCOIDX  .EQU       2H
+S_SCOIMM  .EQU       3H
+S_SCOINR  .EQU       0H
+S_SCOIRN  .EQU       1H
+S_SCORAT  .EQU       0H
+S_SCOSCP  .EQU       1H
+S_SCOSSL  .EQU       3H
+S_SCOVER  .EQU       2H
+V_BSCLI   .EQU      20H
+V_BSCLT   .EQU      10H
+V_BSIDTY  .EQU     040H
+V_BSIEXI  .EQU      10H
+V_BSIINT  .EQU      08H
+V_BSINWF  .EQU      80H
+V_BSISW1  .EQU       2H
+V_BSISW2  .EQU       1H
+V_BSITEX  .EQU      20H
+V_BSITST  .EQU       4H
+V_BSODDN  .EQU      10H
+V_BSOEXO  .EQU      08H
+V_BSOPCT  .EQU     0C0H
+V_BSOSEL  .EQU       4H
+V_BSOSID  .EQU      20H
+V_BSOUNT  .EQU       3H
+V_BSSTP   .EQU      08H
+V_BSSTT   .EQU     040H
+V_BSWAT   .EQU     080H
+V_SCIBSY  .EQU       1H
+V_SCICRC  .EQU      08H
+V_SCIDRQ  .EQU       2H
+V_SCIHDL  .EQU      20H
+V_SCIIND  .EQU       2H
+V_SCILDT  .EQU       4H
+V_SCINRD  .EQU     080H
+V_SCIPRT  .EQU     040H
+V_SCIRCT  .EQU      20H
+V_SCIRNF  .EQU      10H
+V_SCISKE  .EQU      10H
+V_SCITK0  .EQU       4H
+V_SCIWRF  .EQU      20H
+V_SCOCMD  .EQU     0F0H
+V_SCODEL  .EQU       1H
+V_SCODLY  .EQU       4H
+V_SCOHDL  .EQU      08H
+V_SCOIDX  .EQU       4H
+V_SCOIMM  .EQU      08H
+V_SCOINR  .EQU       1H
+V_SCOIRN  .EQU       2H
+V_SCORAT  .EQU       3H
+V_SCOSCP  .EQU       2H
+V_SCOSSL  .EQU      08H
+V_SCOVER  .EQU       4H
+        .ENDM
+
+        .IF     0
+Y_BSIDTY  .EQU       1H
+Y_BSIEXI  .EQU       1H
+Y_BSIINT  .EQU       1H
+Y_BSINWF  .EQU       1H
+Y_BSISW1  .EQU       1H
+Y_BSISW2  .EQU       1H
+Y_BSITEX  .EQU       1H
+Y_BSITST  .EQU       1H
+Y_BSODDN  .EQU       1H
+Y_BSOEXO  .EQU       1H
+Y_BSOPCT  .EQU       2H
+Y_BSOSEL  .EQU       1H
+Y_BSOSID  .EQU       1H
+Y_BSOUNT  .EQU       2H
+Y_DCIMAD  .EQU       3H
+Y_DCIRUN  .EQU       1H
+Y_DCOIAS  .EQU       1H
+Y_DCORST  .EQU       1H
+Y_DCOWEN  .EQU       1H
+Y_ISIHEN  .EQU       1H
+Y_ISIHRT  .EQU       1H
+Y_ISIKEN  .EQU       1H
+Y_ISIKSK  .EQU       1H
+Y_ISOBEL  .EQU       1H
+Y_ISOHEN  .EQU       1H
+Y_ISOHRT  .EQU       1H
+Y_ISOKEN  .EQU       1H
+Y_MCINEM  .EQU       1H
+Y_MCINIE  .EQU       1H
+Y_MCOCNM  .EQU       1H
+Y_MCONIE  .EQU       1H
+Y_MIILV0  .EQU       1H
+Y_MIILV1  .EQU       1H
+Y_MIILV2  .EQU       1H
+Y_MIILV3  .EQU       1H
+Y_MIILV4  .EQU       1H
+Y_MIILV5  .EQU       1H
+Y_MIILV6  .EQU       1H
+Y_MIILV7  .EQU       1H
+Y_MIOLV0  .EQU       1H
+Y_MIOLV1  .EQU       1H
+Y_MIOLV2  .EQU       1H
+Y_MIOLV3  .EQU       1H
+Y_MIOLV4  .EQU       1H
+Y_MIOLV5  .EQU       1H
+Y_MIOLV6  .EQU       1H
+Y_MIOLV7  .EQU       1H
+Y_SCIBSY  .EQU       1H
+Y_SCICRC  .EQU       1H
+Y_SCIDRQ  .EQU       1H
+Y_SCIHDL  .EQU       1H
+Y_SCIIND  .EQU       1H
+Y_SCILDT  .EQU       1H
+Y_SCINRD  .EQU       1H
+Y_SCIPRT  .EQU       1H
+Y_SCIRCT  .EQU       1H
+Y_SCIRNF  .EQU       1H
+Y_SCISKE  .EQU       1H
+Y_SCITK0  .EQU       1H
+Y_SCIWRF  .EQU       1H
+Y_SCOCMD  .EQU       4H
+Y_SCODEL  .EQU       1H
+Y_SCODLY  .EQU       1H
+Y_SCOHDL  .EQU       1H
+Y_SCOIDX  .EQU       1H
+Y_SCOIMM  .EQU       1H
+Y_SCOINR  .EQU       1H
+Y_SCOIRN  .EQU       1H 
+Y_SCORAT  .EQU       2H 
+Y_SCOSCP  .EQU       1H 
+Y_SCOSSL  .EQU       1H 
+Y_SCOVER  .EQU       1H 
+Y_SSIFRM  .EQU       1H 
+Y_SSIOVR  .EQU       1H 
+Y_SSIPAR  .EQU       1H 
+Y_SSIRFL  .EQU       1H 
+Y_SSITDN  .EQU       1H 
+Y_SSITRD  .EQU       1H 
+Y_SSITRM  .EQU       1H 
+Y_SSOBDR  .EQU       2H 
+Y_SSOBRK  .EQU       1H 
+Y_SSOCHR  .EQU       2H 
+Y_SSOCTS  .EQU       1H 
+Y_SSOERR  .EQU       1H 
+Y_SSOIEN  .EQU       1H 
+Y_SSOPAR  .EQU       1H 
+Y_SSOPEN  .EQU       1H 
+Y_SSOREN  .EQU       1H 
+Y_SSORST  .EQU       1H 
+Y_SSOSTP  .EQU       2H 
+Y_SSOTEN  .EQU       1H 
+        .ENDC
+        .LIST
+

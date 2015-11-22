@@ -1,0 +1,727 @@
+;*        MODULE DISPDVR - DISPLAY DEVICE DRIVER
+;
+;  THIS MODULE IS A GENERALIZED DEVICE DRIVER FOR THE
+;  MEMORY-MAPPED DISPLAY.  IT HAS FOUR ENTRY POINTS: 
+;
+;  DISPCH - DISPLAY ONE CHARACTER.
+;
+;         ENTRY - CHARACTER IN C REGISTER.
+;
+;         EXIT - ALL REGISTERS USED.
+;                A CONTAINS E.NOERR
+;
+;  DISPTXT - DISPLAY A TEXT STRING, WITH LENGTH PASSED SEPARATELY.
+;
+;         ENTRY - HL POINTS TO FIRST CHARACTER IN STRING
+;                 BC CONTAINS LENGTH OF STRING.
+;
+;         EXIT - ALL REGISTERS USED.
+;                A CONTAINS E.NOERR
+;
+;  DISPSTR - DISPLAY STRING
+;
+;         ENTRY - HL POINTS TO STRING
+;
+;         EXIT - ALL REGISTERS USED
+;                A CONTAINS E.NOERR
+;
+;  DISPINIT - CLEAR DISPLAY SCREEN AND HOME CURSOR
+;
+;         ENTRY - NO PARAMETERS
+;
+;         EXIT - ALL REGISTERS USED
+;
+;
+;
+;  TEXT TO BE DISPLAYED MUST BE IN ASCII, WITH BIT 7 OF ALL BYTES CLEAR.
+;  THOSE CONTROL CODES INCLUDED
+;  IN THE TABLE BELOW ARE INTERPRETED.  ALL OTHERS ARE IGNORED.
+;
+;  CR - CARRIAGE RETURN
+;  LF - LINE FEED
+;  BS - BACKSPACE
+;  FS - FORWARD SPACE WITHOUT OVERWRITE 
+;  US - REVERSE LINE FEED
+;  SY - REVERSE SCROLL
+;  EM - MOVE CURSOR TO HOME
+;  VT - ERASE TO END OF SCREEN
+;  GS - ERASE TO END OF LINE
+;  FF - CLEAR SCREEN AND MOVE TO HOME
+;  SO - CLEAR LINE CURSOR IS CURRENTLY ON
+;  SI - CLEAR ENTIRE SCREEN
+;  RS - DIRECT CURSOR ADDRESSING SEQUENCE
+;
+;
+;
+        .PAGE
+;*        WORK AREA 
+;
+;
+CURSOR  .EQU    DISPWORK        ; POINTER INTO BUFFER OF CURSOR POSTION
+;         EQU    DISPWORK+1
+DISPTMP .EQU    DISPWORK+2      ; TEMP FOR DISPCH 
+CURSAV  .EQU    DISPTMP+1       ; CHARACTER OVERLAYED BY CURSOR
+DSPFLAGS .EQU    CURSAV+1        ; CONTROL FLAGS (POINTED TO BY IX)
+DSPNEWX .EQU    DSPFLAGS+1      ; SAVED NEW X COORDINATE DURING DCA
+
+
+
+;*        MEMORY-MAPPED DISPLAY HARDWARE DEFINITIONS
+;
+;
+V_CHAR  .EQU    3FH             ; CHARACTER BITS IN DISPLAY IMAGE
+V_INTENS .EQU    80H             ; INTENSIFY BIT IN DISPLAY IMAGE
+LINEOFST .EQU    128.            ; OFFSET BETWEEN LINES
+LINELGTH .EQU    80.             ; LENGTH OF LINE 
+LINEGAP .EQU    LINEOFST-LINELGTH ; UNUSED SPACE BETWEEN LINES
+LINENUM .EQU    24.             ; NUMBER OF LINES 
+ENTLINE .EQU    SCREEN+<<LINENUM-1>*LINEOFST>
+
+
+
+;*        INTERNAL SYMBOLS
+;
+;
+CURCH   .EQU    0C3H            ; CURSOR CHARACTER
+
+
+
+;*        FLAG BITS 
+;
+;  THESE SYMBOLS DEFINE BITS WITHIN THE FLAG BYTE DSPFLAGS. 
+;
+S_DCAP  .EQU    0               ; DIRECT CURSOR ADDRESSING SEQUENCE
+S_DCAX  .EQU    1               ; DCA X COOR ALREADY OBTAINED
+        .PAGE
+;*        ENTRY POINT DISPINIT - INITIALIZE DISPLAY
+;
+;
+DISPINIT
+        LD      DE,SCREEN       ; INITIAIZE CURSOR
+        LD      (CURSOR),DE
+
+        LD      A,0             ; CLEAR FLAGS
+        LD      (DSPFLAGS),A
+
+        LD      A,LINENUM       ; NUMBER OF LINES TO CLEAR
+        CALL    DISCLSC         ; CLEAR SCREEN
+
+        JP      DSPX            ; GO SAVE CURSOR OVERLAY
+        .PAGE
+;*
+;  THIS TABLE DEFINES THE CONTROL CODES THAT ARE INTERPRETED.
+;
+CTLTBL
+        
+        .BYTE   CH_LF
+        .BYTE   CH_CR
+        .BYTE   CH_BS
+        .BYTE   CH_EM
+        .BYTE   CH_VT
+        
+        
+        .IF     ~DDTMON
+        
+        .BYTE   CH_FS
+        .BYTE   CH_RS
+        .BYTE   CH_US
+        .BYTE   CH_SYN
+        .BYTE   CH_GS
+        .BYTE   CH_SO
+        .BYTE   CH_SI
+        .BYTE   CH_FF
+
+        .ENDC
+        
+L_CTLTBL .EQU    $-CTLTBL
+
+
+
+;*
+;  THIS TABLE DEFINES THE STARTING ADDRESSES OF THE INTERPRETERS FOR
+;  THE CONTROL CODES DEFINED ABOVE.  THE ENTRIES OF THIS TABLE
+;  MUST BE IN THE SAME ORDER AS ABOVE.
+;
+        
+        .WORD   ILF             ; LINE FEED
+        .WORD   ICR             ; CARRIAGE RETURN 
+        .WORD   IBS             ; BACKSPACE
+        .WORD   IHOME           ; HOME
+        .WORD   IEEOS           ; ERASE TO END OF SCREEN
+        
+        .IF     ~DDTMON
+        
+        .WORD   IFWD            ; FORWARD SPACE
+        .WORD   IDCA            ; INTERPRET DCA SEQUENCE
+        .WORD   IRVLF           ; REVERSE LINE FEED
+        .WORD   IRSC            ; REVERSE SCROLL
+        .WORD   IEEOL           ; ERASE TO END OF LINE
+        .WORD   ICLRL           ; CLEAR CURRENT LINE
+        .WORD   ICLRSC          ; CLEAR ENTIRE SCREEN
+        .WORD   IFF             ; CLEAR SCREEN AND MOVE TO HOME
+
+        .ENDC
+
+CTLEND
+        .PAGE
+;*        ENTRY POINT DISPCH - DISPLAY ONE CHARACTER
+;
+;  STORE THE CHARACTER INTO A TEMPORARY LOCATION IN MEMORY, LOAD UP A 
+;  STRING LENGTH OF 1, AND JUMP TO THE DISPTXT ENTRY POINT. 
+;
+DISPCH
+        LD      HL,DISPTMP      ; ADDRESS OF TEMPORARY TEXT ARRAY
+        LD      (HL),C          ; STORE CHARACTER INTO TEMP 
+
+        LD      BC,1            ; LOAD ARRAY LENGTH
+
+        JR      DISPTXT         ; GO DISPLAY
+
+
+
+;*        ENTRY POINT DISPSTR - DISPLAY STRING
+;
+;  SET UP ENTRY CONDITIONS FOR DISPTXT, AND GO TO IT.
+;
+DISPSTR
+        LD      C,(HL)          ; LOAD 8-BIT STRING LENGTH
+        LD      B,0             ; PAD LENGTH OUT TO 16 BITS 
+
+        INC     HL              ; BUMP POINTER TO START OF TEXT
+
+        FALLTHRU DISPTXT
+
+
+
+;*        ENTRY POINT DISPTXT - DISPLAY TEXT ARRAY
+;
+;  SET UP REGISTERS FOR THE SCAN AND MOVE LOOP.  MOST ARE ALREADY
+;  SET UP BY CALLER.
+;
+DISPTXT
+        LD      DE,(CURSOR)     ; CURRENT CURSOR POINTER
+
+        FALLTHRU DISOUT
+        .PAGE
+;*
+;  START BY REMOVING THE CURSOR FROM THE SCREEN, AND REPLACING
+;  THE CHARACTER THAT IT HAD OVERLAYED. 
+;
+DISOUT
+        LD      A,(CURSAV)      ; RESTORE OVERLAYED POSITION
+        LD      (DE),A
+
+;
+;  CHECK THE FLAG BYTE TO SEE IF WE ARE IN THE MIDDLE OF A DIRECT
+;  CURSOR ADDRESSING (DCA) SEQUENCE.  IF SO, GO PROCESS THE NEXT
+;  CHARACTER OF THE SEQUENCE. 
+;
+        .IF     ~DDTMON
+        
+        LD      IX,DSPFLAGS     ; ADR OF FLAG BYTE
+        BIT     S_DCAP,(IX+0) 
+        JP      NZ,DCAIP        ; JUMP IF DCA IN PROGRESS
+
+        .ENDC
+;
+;  TOP OF LOOP...SEE IF THE NEXT BYTE CONTAINS A CONTROL
+;  CODE, AND BRANCH IF SO.  OTHERWISE, PUT THE CHARACTER INTO
+;  DISPLAY FORMAT, AND PUT IT INTO THE DISPLAY IMAGE BUFFER.
+;
+DISSCAN
+        LD      A,(HL)          ; GET NEXT CHARACTER TO DISPLAY
+        CP      CH_VS+1
+        JR      C,DISCONT       ; JUMP IF CONTROL CHARACTER 
+
+;
+;  CHARACTER IS TO BE DISPLAYED.
+;
+DISCH
+        CP      CH_UL+1
+        JR      NC,DISNOTU      ; JUMP IF NOT UPPER CASE
+
+        CP      CH_AT
+        JR      C,DISNOTU       ; JUMP IF NOT UPPER CASE
+;
+;  CHARACTER IS UPPER-CASE ALPHABETIC.
+;
+        AND     V_CHAR          ; SAVE ONLY CHARACTER BITS
+
+
+;*
+;  CHARACTER IS NOT UPPER-CASE ALPHABETIC.
+;  DISPLAY IT AS-IS.
+;
+DISNOTU
+;
+;  PUT CHARACTER INTO DISPLAY IMAGE BUFFER.  ADVANCE THE CURSOR,
+;  AND LOOP IF MORE CHARACTERS TO GO.
+;
+        LD      (DE),A          ; PUT CHARACTER INTO IMAGE BUFFER
+
+        INC     DE              ; ADVANCE CURSOR
+
+DISNXT
+        INC     HL              ; BUMP CHARACTER POINTER
+
+        DEC     BC              ; DECREMENT LENGTH COUNTER
+        LD      A,B 
+        OR      C
+        JR      NZ,DISSCAN      ; LOOP IF MORE TO GO
+
+;
+;  ENTIRE STRING HAS BEEN DISPLAYED.  UPDATE THE CURSOR POINTER
+;  IN MEMORY, AND RETURN.
+;
+DISDN
+        LD      (CURSOR),DE     ; UPDATE CURSOR POINTER
+
+DSPX
+        LD      A,(DE)          ; GET CURRENT OCCUPANT OF CURSOR POSITION
+        LD      (CURSAV),A      ; SAVE IT
+
+        LD      A,CURCH         ; PUT CURSOR ON SCREEN
+        LD      (DE),A
+
+        LD      A,E_NOERR       ; NO ERRORS DETECTED
+
+        RET
+        .PAGE
+;*
+;  SEARCH CONTROL CODE TABLE FOR A MATCH.  ENTER WITH CHARACTER IN A. 
+;
+DISCONT
+        PUSH    HL              ; SAVE CHARACTER POINTER
+        PUSH    BC              ; SAVE CHARACTER COUNT
+
+        LD      (CURSOR),DE     ; SAVE CURRENT CURSOR IN MEMORY
+
+        LD      HL,CTLTBL       ; ADDRESS OF TABLE
+        LD      BC,L_CTLTBL     ; LENGTH OF TABLE IN BYTES
+        CPIR                    ; SEARCH TABLE
+        JR      NZ,CTLEXIT      ; IGNORE IF NOT IN TABLE
+
+;*
+;  THE CONTROL CODE WAS FOUND IN THE TABLE.  GET THE ADDRESS
+;  OF ITS INTERPRETER FROM THE TABLE, AND JUMP TO IT.
+;
+CTLFND
+        RLC     C               ; MULTIPLY BC BY 2
+        RL      B
+        LD      HL,CTLEND-2     ; END OF TABLE
+        SBC     HL,BC           ; COMPUTE ADDRESS OF ENTRY
+
+        LD      E,(HL)          ; GET LOW INTERPRETER ADDRESS
+        INC     HL
+        LD      D,(HL)          ; GET HIGH INTERPRETER ADDRESS
+        EX      DE,HL           ; MOVE ADDRESS TO HL
+        LD      DE,(CURSOR)     ; GET CURSOR POINTER TO DE
+        JP      (HL)            ; JUMP TO INTERPRETER
+
+
+
+;*
+;  EXIT AFTER INTERPRETING CONTROL CHARACTER.
+;
+CTLEXIT
+        POP     BC              ; RESTORE CHARACTER COUNT
+        POP     HL              ; RESTORE CHARACTER POINTER 
+
+        JR      DISNXT
+        .PAGE
+;*
+;  INTERPRET LINE FEED.  FIRST,  SEE IF WE ARE ALREADY ON
+;  THE LAST LINE OF THE SCREEN.
+;
+ILF
+        LD      HL,ENTLINE-1    ; START OF LAST LINE - 1
+        AND     A               ; CLEAR C FLAG
+        SBC     HL,DE           ; COMPARE TO CURRENT CURSOR 
+        JR      C,ROLL          ; JUMP IF ON LAST LINE
+;
+;  NOT ON LAST LINE, SO SIMPLY ADVANCE CURSOR ONE LINE.
+;
+        LD      HL,LINEOFST     ; OFFSET BETWEEN LINES
+        ADD     HL,DE           ; BUMP CURSOR POINTER
+        EX      DE,HL           ; MOVE POINTER BACK TO DE
+        JR      IEXIT
+
+;*
+;  ALREADY AT LAST LINE ON SCREEN, SO ROLL THE SCREEN IMAGE 
+;  UP ONE LINE.
+;
+ROLL
+        LD      DE,SCREEN       ; FIRST DESTINATION
+        LD      HL,SCREEN+LINEOFST ; FIRST SOURCE 
+        LD      A,LINENUM-1     ; NUMBER OF LINES TO ROLL
+
+ROLLLINE
+        LD      BC,LINELGTH     ; LENGTH OF LINE
+
+        LDIR                    ; MOVE LINE UP
+
+        LD      BC,LINEGAP      ; GAP BETWEEN LINES
+        ADD     HL,BC           ; BUMP SOURCE ADDRESS
+        EX      DE,HL           ; MOVE DE TO HL FOR BUMPING 
+        ADD     HL,BC           ; BUMP DESTINATION ADDRESS
+        EX      DE,HL           ; MOVE DE BACK WHERE IT BELONGS
+        DEC     A               ; DECREMENT LINE COUNT
+        JR      NZ,ROLLLINE
+;
+;  CLEAR THE ENTRY LINE TO BLANKS.
+;
+        LD      C,LINELGTH      ; LENGTH OF LINE
+        LD      DE,ENTLINE      ; BEGINNING OF LINE
+        CALL    CLRLINE         ; CLEAR LINE
+
+        LD      DE,(CURSOR)     ; PUT CURSOR BACK IN DE
+IEXIT
+        JP      CTLEXIT
+
+
+
+;*
+;  INTERPRET CARRIAGE RETURN.  SIMPLY CLEAR OUT THE BITS OF 
+;  THE CURSOR POINTER THAT SPECIFY THE COLUMN NUMBER.
+;
+        ASSUME  LINEOFST,EQ,80H
+
+ICR
+        LD      A,E             ; GET LOW PART OF POINTER
+        AND     80H             ; CLEAR OUT COLUMN BITS
+        LD      E,A             ; PUT BACK IN E
+
+        JR      IEXIT
+        .PAGE
+;*
+;  INTERPRET BACK SPACE.
+;
+IBS
+        DEC     DE              ; DECREMENT CURSOR POINTER
+        
+        .IF     ~DDTMON
+        
+        CALL    CHKCURS         ; CHECK FOR VALID POSITION
+
+        .ENDC
+        
+        JR      IEXIT
+
+;*
+;  INTERPRET HOME CURSOR.
+;
+IHOME
+        LD      DE,SCREEN       ; RESET CURSOR POINTER
+
+        JR      IEXIT
+
+
+
+;*
+;  INTERPRET ERASE TO END OF SCREEN
+;
+IEEOS
+        LD      HL,ENTLINE+LINELGTH ; COMPUTE LINES TO CLEAR
+        AND     A               ; CLEAR C FLAG
+        SBC     HL,DE
+        RL      L               ; MOVE BOTTOM BIT TO C
+        LD      C,H 
+        RL      C               ; COUNT NOW IN C REGISTER
+        JR      Z,IEEOL         ; JUMP IF NO FULL LINES TO CLEAR
+
+        LD      A,E             ; MOVE DE TO START OF FULL LINE
+        AND     80H 
+        ADD     A,80H           ; BUMP TO NEXT LINE
+        LD      E,A 
+        LD      A,D 
+        ADC     A,0             ; ADD IN CARRY
+        LD      D,A 
+        LD      A,C             ; PUT LINE COUNT IN A
+        CALL    DISCLSC         ; CLEAR SCREEN
+
+        LD      DE,(CURSOR)     ; RESTORE CURSOR TO DE
+
+        FALLTHRU IEEOL
+
+
+
+;*
+;  INTERPRET ERASE TO END OF LINE.
+;
+IEEOL
+        ASSUME  LINEOFST,EQ,80H
+        LD      A,E             ; MOVE BOTTOM OF CURSOR TO A
+        AND     7FH             ; SAVE COLUMN NUMBER
+        SUB     LINELGTH        ; COMPUTE NUMBER TO CLEAR
+        NEG
+        LD      C,A             ; MOVE COUNT TO C 
+
+        CALL    CLRLINE         ; CLEAR LINE
+
+RSEXIT
+        LD      DE,(CURSOR)     ; RESTORE CURSOR TO DE
+
+        JP      CTLEXIT
+
+
+        .IF     ~DDTMON
+        
+
+;*
+;  INTERPRET FORWARD (NON-DISTRUCTIVE) SPACE.
+;
+IFWD
+        INC     DE              ; ADVANCE CURSOR POINTER
+        CALL    CHKCURS         ; CHECK FOR VALID POSITION
+        JR      IEXIT
+        
+
+
+;*
+;   INTERPRET REVERSE SCROLL.  MOVE ALL LINES EXCEPT THE TOP ONE ON THE SCREEN D
+;  ONE LINE (DISCARDING THE BOTTOM ONE), AND CLEAR THE TOP
+;  LINE TO BLANKS.  LEAVE THE CURSOR WHERE IT WAS.
+;
+IRSC
+        LD      DE,LINENUM*LINEOFST+SCREEN-LINEOFST ; FIRST DESTINATION
+        LD      HL,LINENUM*LINEOFST+SCREEN-LINEOFST-LINEOFST ; SOURCE 
+        LD      A,LINENUM-2     ; NUMBER OF LINES TO ROLL
+
+ROLLUP
+        LD      BC,LINELGTH     ; LENGTH OF LINE
+
+        LDIR                    ; MOVE LINE DOWN
+
+        LD      BC,-<LINEOFST+LINELGTH> ; GAP BETWEEN LINES
+        ADD     HL,BC           ; BUMP SOURCE ADDRESS
+        EX      DE,HL           ; MOVE DE TO HL FOR BUMPING 
+        ADD     HL,BC           ; BUMP DESTINATION ADDRESS
+        EX      DE,HL           ; MOVE DE BACK WHERE IT BELONGS
+        DEC     A               ; DECREMENT LINE COUNT
+        JR      NZ,ROLLUP
+;
+;  CLEAR THE TOP   LINE TO BLANKS.
+;
+        LD      C,LINELGTH      ; LENGTH OF LINE
+        LD      DE,SCREEN       ; BEGINNING OF LINE
+        CALL    CLRLINE         ; CLEAR LINE
+
+        LD      DE,(CURSOR)     ; PUT CURSOR BACK IN DE
+        JP      IEXIT
+
+       
+
+;*
+;  INTERPRET REVERSE LINE FEED.
+;
+IRVLF
+        LD      HL,-LINEOFST    ; OFFSET BETWEEN LINES
+        ADD     HL,DE           ; REDUCE CURSOR POINTER
+        EX      DE,HL           ; MOVE POINTER BACK TO DE
+        CALL    CHKCURS         ; CHECK FOR VALID POSITION
+
+        JP      CTLEXIT
+
+
+
+
+;*
+;  INTERPRET CLEAR LINE
+;
+ICLRL
+        LD      A,E             ; SIMULATE A CARRIAGE RETURN
+        AND     80H 
+        LD      E,A 
+
+        JR      IEEOL           ; GO ERASE LINE
+
+
+
+;*
+;  INTERPRET CLEAR SCREEN
+;
+ICLRSC
+        LD      DE,SCREEN       ; BEGIN CLEARING AT THE TOP 
+        LD      A,LINENUM       ; CLEAR ENTIRE SCREEN
+        CALL    DISCLSC         ; CLEAR SCREEN
+        JP      RSEXIT
+
+
+
+;*
+;  INTERPRET FORM-FEED CHARACTER.  CLEAR ENTIRE SCREEN, AND MOVE TO HOME.
+;
+IFF
+        LD      DE,SCREEN       ; BEGIN CLEARING AT THE TOP 
+        LD      A,LINENUM       ; CLEAR ALL OF SCREEN
+        CALL    DISCLSC         ; CLEAR SCREEN
+
+        LD      DE,SCREEN       ; PUT CURSOR AT HOME POSITION
+
+        JP      CTLEXIT
+        .PAGE
+;*
+;  PROCESS DIRECT CURSOR ADDRESSING SEQUENCE.
+;
+IDCA
+        SET     S_DCAP,(IX+0)   ; SET DCA FLAG
+        POP     BC              ; RESTORE CHARACTER COUNT
+        POP     HL              ; RESTORE CHARACTER POINTER 
+;
+;  SEE IF THERE ARE ANY MORE CHARACTERS LEFT TO BE DISPLAYED.  IF
+;  SO, WE FINISH UP THE SEQUENCE HERE, RATHER THAN RETURNING TO THE
+;  MAIN CHARACTER LOOP FOR EACH ONE.  THIS SPEEDS UP THE MAIN
+;  CHARACTER LOOP.
+;
+DCANXT
+        INC     HL              ; ADVANCE CHARACTER POINTER 
+
+        DEC     BC              ; DECREMENT CHARACTER COUNTER
+        LD      A,B             ; CHECK COUNT FOR ZERO
+        OR      C
+        JP      Z,DISDN         ; JUMP IF DATA EXHAUSTED
+;
+;  PROCESS THE NEXT CHARACTER IN A DCA SEQUENCE.  THE STATE OF THE
+;  FLAGS DETERMINES WHETHER THIS IS AN X OR A Y COORDINATE CHARACTER. 
+;
+DCAIP
+        BIT     S_DCAX,(IX+0)   ; CHECK X FLAG
+        JR      NZ,GOTX         ; JUMP IF ALREADY GOT X COORD
+;
+;  PROCESS THE X COORDINATE CHARACTER
+;
+        LD      A,(HL)          ; GET THE CHARACTER
+        SUB     CH_A            ; CONVERT TO COORDINATE
+        LD      (DSPNEWX),A     ; SAVE X COORD
+
+        SET     S_DCAX,(IX+0)   ; REMEMBER WE NOW HAVE X
+        JR      DCANXT          ; GO GET NEXT CHARACTER
+
+
+
+;*
+;  PROCESS THE Y COORDINATE CHARACTER AND ACTUALLY MOVE THE CURSOR.
+;
+GOTX
+        LD      A,(HL)          ; GET THE COORDINATE CHARACTER
+        SUB     CH_A            ; CONVERT TO COORD
+        RR      A               ; CONVERT TO ADDRESS (TOP BYTE)
+        LD      E,0             ; CLEAR LOW ADDRESS BYTE
+        RR      E               ; AND INSERT TOP BIT
+        ADD     A,SCREEN/0100H  ; ADD-IN ADDRESS OF BUFFER
+        LD      D,A             ; AND MOVE TO TOP OF DE
+        LD      A,(DSPNEWX)     ; GET NEW X COORD 
+        ADD     A,E             ; ADD-IN TOP BIT
+        LD      E,A             ; PUT ADDRESS IN DE
+;
+;  CHECK THE NEW CURSOR POSITION, AND CLEAR THE DCA-IN-PROGRESS FLAGS.
+;
+        PUSH    HL              ; SAVE CHARACTER POINTER
+        CALL    CHKCURS         ; CHECK CURSOR POSITION
+        POP     HL              ; RESTORE CHARACTER POINTER 
+
+        RES     S_DCAP,(IX+0)   ; RESET FLAGS
+        RES     S_DCAX,(IX+0) 
+
+        JP      DISNXT
+        
+        .ENDC
+        
+        .PAGE
+;*        SUBROUTINE DISCLSC - CLEAR PART OF SCREEN
+;
+;         ENTRY  - DE POINTS TO FIRST LINE TO CLEAR
+;                  A CONTAINS NUMBER OF LINES TO CLEAR
+;
+;         EXIT -
+;                REGISTERS A, B, C, D, E, H AND L USED.
+;
+DISCLSC
+        EX      DE,HL           ; MOVE CURSOR TO HL
+        LD      B,0             ; CLEAR TOP OF BC 
+
+DISCLSLP
+        LD      C,LINELGTH-1    ; LENGTH OF LINE - 1
+        LD      D,H             ; COPY CURSOR TO DE
+        LD      E,L 
+        LD      (HL),CH_SP      ; CLEAR FIRST LOCATION
+
+        INC     DE              ; BUMP DESTINATION
+
+        LDIR                    ; CLEAR REST OF LINE
+
+        LD      DE,LINEOFST-LINELGTH+1 ; GAP TO START OF NEXT LINE
+        ADD     HL,DE
+
+        DEC     A               ; DECREMENT LINE COUNT
+        JR      NZ,DISCLSLP     ; LOOP IF MORE TO CLEAR
+
+        RET
+        .PAGE
+;*        SUBROUTINE CLRLINE - CLEAR PART OF CURRENT LINE
+;
+;         CALL - BEGINNING POINTED TO BY DE
+;                CHARACTER COUNT IN C
+;
+;         EXIT - LAST POSITION + 1 IN DE
+;                BC, HL ALSO USED
+;
+;
+CLRLINE
+        LD      H,D             ; COPY CURSOR TO HL
+        LD      L,E 
+        LD      (HL),CH_SP      ; CLEAR FIRST LOCATION
+
+        INC     DE              ; BUMP DE
+
+        DEC     C               ; COUNT POSTION JUST CLEARED
+        RET     Z               ; RETURN IF THERE WAS ONLY ONE
+
+        LD      B,0             ; CLEAR TOP OF BC 
+
+        LDIR                    ; CLEAR REST OF LOCATIONS
+
+        RET
+        .PAGE
+
+        .IF     ~DDTMON
+        
+;*        SUBROUTINE CHKCURS - CHECK CURSOR POSITION
+;
+;         ENTRY - DE CONTAINS CURSOR POSITION
+;
+;         EXIT - DE CONTAINS (POSSIBLY CORRECTED) CURSOR POSITION
+;
+;                USES A, HL
+;
+CHKCURS
+        LD      HL,SCREEN-1     ; CHECK FOR BEING ABOVE SCREEN
+        AND     A               ; CLEAR C FLAG
+        SBC     HL,DE
+        JR      C,CHKCUR1       ; JUMP IF OK
+
+        LD      HL,-1           ; RESET CURSOR TO (0,0)
+;
+;  CHECK FOR CURSOR BEING BELOW THE BOTTOM OF THE SCREEN
+;  (ADDRESS TOO LARGE).
+;
+CHKCUR1
+        LD      DE,LINENUM*LINEOFST-LINEOFST+LINELGTH
+        ADD     HL,DE
+        JR      C,CHKCUR2       ; JUMP IF OK
+
+        LD      HL,0            ; RESET CURSOR TO (23,79)
+;
+;  RESTORE THE CORRECT CURSOR ADDRESS AND EXIT.
+;
+CHKCUR2
+        EX      DE,HL           ; MOVE TEMP TO DE 
+        LD      HL,SCREEN+<LINENUM*LINEOFST>-LINEOFST+LINELGTH-1
+        AND     A               ; CLEAR C FLAG
+        SBC     HL,DE           ; CORRECT CURSOR POINTER
+        EX      DE,HL           ; MOVE POINTER TO DE
+
+        RET
+        
+        .ENDC
+        
