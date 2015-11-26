@@ -6,13 +6,19 @@
 
 
 ;
-;
+;  "Z2" was the last monitor version built in the 1980's.  
+;  I believe that I bumped the letter part of the version code when a 
+;  change was made that was incompatible with other parts of the software.
+;  I don't remember why I jumped to "Z" in the 1980's, nor what the
+;  last letter that I'd used before that was.  So I'll start the
+;  2015 version of monitor with "M".
 ;
 
-VERSION  .EQU  "Z2"
+VERSION  .EQU  "M1"
 
 ;       MODIFICATIONS:
 ;
+;  26 Nov 15 - Add support for IDE disk controller (M1).
 ;  04 Feb 85 - Added assembly option to make MONITOR work with DDT in PROM.
 ;  05 Jan 85 - Changed memory configuration to use all of top memory (K3).
 ;  29 Dec 84 - ADDED USER INTERRUPT ENTRY POINT (K2).
