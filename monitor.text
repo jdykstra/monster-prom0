@@ -6,15 +6,15 @@
 
 
 ;
-;  "Z2" was the last monitor version built in the 1980's.  
-;  I believe that I bumped the letter part of the version code when a 
+;  "Z2" was the last monitor version built in the 1980's.
+;  I believe that I bumped the letter part of the version code when a
 ;  change was made that was incompatible with other parts of the software.
 ;  I don't remember why I jumped to "Z" in the 1980's, nor what the
 ;  last letter that I'd used before that was.  So I'll start the
 ;  2015 version of monitor with "M".
 ;
 
-VERSION  .EQU  "M1"
+VERSION  .EQU  "X1"
 
 ;       MODIFICATIONS:
 ;
@@ -50,12 +50,12 @@ LISTINC .EQU    0
 
 
 
-;*        Bootstrap entry conditions 
+;*        Bootstrap entry conditions
 ;
 ;  B register contains the number of the disk unit
 ;         from which the bootstrap was read.
 ;
-;  C register contains the entry code: 
+;  C register contains the entry code:
 ;
 ;         0 - Fast bootstrap (monitor F command)
 ;         1 - Standard bootstrap (monitor B command)
@@ -69,13 +69,13 @@ LISTINC .EQU    0
 
 
 
-;*        Monitor Requests 
+;*        Monitor Requests
 ;
 ;  Monitor requests are made via a RST 40 instruction.  Alternately,
 ;  the request may be made with a CALL instruction
 ;  directly to entry point REQUEST in MONITOR.
 ;
-;  The request number (see below) is passed in 
+;  The request number (see below) is passed in
 ;  register A.  Registers B, C, D, E, H, L and IY
 ;  are available for passing parameters to
 ;  MONITOR, and all registers are available
@@ -107,7 +107,7 @@ BOOTADR .EQU    8000H           ; ADDRESS OF BOOTSTRAP IN MEMORY
 LASTRAM .EQU    0FA7EH          ; LAST AVAILABLE RAM WORD ADDRESS
 
         .ELSE
-        
+
 DDTINIT .EQU    0801H           ; INITIALIZATION ENTRY TO DDT IN PROM
 INROM   .EQU    1               ; IF ZERO, LOADED BY ANOTHER MONITOR
 ORIGIN  .EQU    0000H           ; ORIGIN OF MONITOR IN ADDRESS SPACE
@@ -156,7 +156,7 @@ USTHOST .EQU    4               ; HOST INTERRUPT
 USTDMT  .EQU    5               ; DEADMAN TIMER INTERRUPT
 USTMCE  .EQU    6               ; MONITOR CALL ERROR
 USTGO   .EQU    7               ; USER PROCESS NOW RUNABLE
-USTRST8 .EQU    08H             ; RST INSTRUCTION TO 0#0008 
+USTRST8 .EQU    08H             ; RST INSTRUCTION TO 0#0008
 USTRST16 .EQU    10H             ; RST INSTRUCTION TO 0#0010
 USTRST24 .EQU    18H             ; RST INSTRUCTION TO 0#0018
 USTRST32 .EQU    20H             ; RST INSTRUCTION TO 0#0020
@@ -199,7 +199,7 @@ SCCWORK .EQU    DISPWORK+6      ; WORK AREA FOR SERIAL COMM. CONTROLLER
 DSKWORK .EQU    SCCWORK+41.     ; WORK AREA FOR DISKDRV
 MONSTACK .EQU   DSKWORK+0        ; LIMIT OF MONITOR STACK
 MSTKBASE .EQU   MONSTACK+MSTKSIZE ; BASE OF MONITOR STACK
-        
+
         .IF     ~DDTMON
 SERWORKB .EQU    WORKB           ; WORK AREA FOR SERIAL DRIVER
         .ENDC
@@ -208,9 +208,9 @@ SERWORKB .EQU    WORKB           ; WORK AREA FOR SERIAL DRIVER
 ;*        MACRO GOTOXY - POSITION DISPLAY CURSOR
 ;
 ;  THIS MACRO GENERATES A STRING OF CHARACTER BYTES,
-;  WHICH, WHEN INTERPRETED BY THE DISPLAY DRIVER, 
+;  WHICH, WHEN INTERPRETED BY THE DISPLAY DRIVER,
 ;  WILL POSITION THE CURSOR TO A GIVEN LINE AND
-;  COLUMN POSITION. 
+;  COLUMN POSITION.
 ;
 ;  CALL - THE SECOND PARAMETER GIVES THE VERTICAL LOCATION.
 ;         THE FIRST PARAMETER GIVES THE HORIZONTAL LOCATION.
@@ -316,16 +316,16 @@ MONLOC0
         PUSH    AF              ; STORE ON STACK
 
         LD      A,P_RST0        ; REMEMBER WHERE ENTERED
-        JP      DOTRAP          ; GO MERGE WITH OTHER RST-S 
+        JP      DOTRAP          ; GO MERGE WITH OTHER RST-S
 
-;*        REQUEST ENTRY POINT 
+;*        REQUEST ENTRY POINT
 ;
 ;  MONITOR IS ENTERED HERE WHEN A USER PROGRAM REQUESTS
 ;  SOME SERVICE.
 ;
 REQUEST
         PUSH    BC              ; SAVE CONTENTS OF BC
-        LD      B,0             ; CLEAR TOP OF BC 
+        LD      B,0             ; CLEAR TOP OF BC
         LD      C,A             ; MOVE REQUEST NUMBER TO C
         LD      IX,REQTBL       ; ADDRESS OF REQUEST TABLE
         ADD     IX,BC           ; COMPUTE ENTRY ADDRESS
@@ -338,8 +338,8 @@ REQUEST
         JP      (IX+0)          ; JUMP INTO TABLE ENTRY
         .PAGE
 ;*      USER INTERRUPT ENTRY POINT
-;  
-;  If the keyboard interrupt handler sees a particular key combination, 
+;
+;  If the keyboard interrupt handler sees a particular key combination,
 ;  it sets up the stack so that the processor comes here after completion
 ;  of the interrupt.
 ;
@@ -349,9 +349,9 @@ USERINT
         PUSH    AF              ; SAVE USER AF
         LD      A,USTHOST         ; SET UP ENTRY CODE
         JR      $10             ; GO DO TRAP
-        
-        
-        
+
+
+
 ;*        NON-MASKABLE INTERRUPT HARDWARE ENTRY POINT
 ;
 ;
@@ -383,23 +383,23 @@ REQTBL
         JP      KEYSTAT         ; F - GET KEYBOARD STATUS
         JP      KEYNECHO        ; 12 - READ KEYBOARD W/O ECHO
         JP      KEYCHAR         ; 15 - READ 1 CHAR FROM KEYBOARD
-        
+
         .IF     ~DDTMON
-        
+
         JP      SERSET          ; 18 - SET SERIAL INTERFACE PARAMETERS
         JP      DISPTXT         ; 1B - DISPLAY TEXT
-        JP      DSKADR          ; 1E - CONVERT DISK ADDRESS 
+        JP      DSKADR          ; 1E - CONVERT DISK ADDRESS
         JP      READCLK         ; 21 - READ TICK CLOCK
         JP      DSKRD           ; 24 - READ DISK
-        JP      DSKWRT          ; 27 - WRITE DISK 
+        JP      DSKWRT          ; 27 - WRITE DISK
         .BLOCK  3               ; 2A - NOT USED (WAS DISK STATUS)
         JP      SERSTAT         ; 2D - GET SERIAL INTERFACE STATUS
         JP      SERREAD         ; 30 - READ CHARACTER FROM SERIAL INTERFACE
         JP      SERWRITE        ; 33 - WRITE CHARACTER TO SERIAL INTERFACE
         JP      OLDCTL          ; 36 - OLD SERIAL CONTROL FUNCTION
-        
+
         .ENDC
-        
+
         .PAGE
 ;*        USER EXIT MONITOR REQUEST
 ;
@@ -411,7 +411,7 @@ UDONE
         JP      DOTRAP
         .PAGE
 ;*
-;  INITIALIZE THE PROCESSOR AFTER SYSTEM RESET OR 
+;  INITIALIZE THE PROCESSOR AFTER SYSTEM RESET OR
 ;  POWER-UP.
 ;
 ;  SET THE PROCESSOR I REGISTER TO POINT TO THE INTERRUPT VECTOR,
@@ -442,20 +442,18 @@ DORESET
 ;
         CALL    DISPINIT        ; CLEAR DISPLAY SCREEN
         CALL    SCCINIT         ; INITIALIZE SERIAL COMM. CONTROLLER
-        
+
         .IF     ~DDTMON
-        
-        CALL    DSKINIT         ; INITIALIZE DISK SUBSYSTEM
 
         JP      WASRESET
-        
+
         .ELSE
-        
+
         EI
         JP      DDTINIT         ; GO EXECUTE DDT IN PROM
-        
+
         .ENDC
-        
+
         .PAGE
 ;*        INTERRUPT VECTOR
 ;
@@ -478,7 +476,7 @@ DORESET
 ;
 ;         ENTRY - USER AF ON TOP OF STACK.
 ;                 USER PC BELOW AF ON STACK
-;                 ADDRESS OF INTERRUPT ENTRY IN A 
+;                 ADDRESS OF INTERRUPT ENTRY IN A
 ;
 DOTRAP
         LD      (USTCODE),A     ; USER STATE CODE = RST DESTINATION
@@ -490,7 +488,7 @@ DOTRAP
 MONENT
         LD      A,I             ; GET USER I AND I FLAG
         DI
-        LD      (USERI),A       ; SAVE I REGISTER 
+        LD      (USERI),A       ; SAVE I REGISTER
         LD      A,0             ; ASSUME INTERRUPTS DISABLED
         JP      PO,$10          ; JUMP IF INTERRUPTS DISABLED
 
@@ -510,16 +508,16 @@ $10
         EX      AF              ; GO TO ALTERNATE REGISTER SET
         EXX
         LD      (USERBCAL),BC   ; SAVE ALTERNATE REGISTERS
-        LD      (USERDEAL),DE 
-        LD      (USERHLAL),HL 
+        LD      (USERDEAL),DE
+        LD      (USERHLAL),HL
         PUSH    AF              ; SAVE ALTERNATE AF
         POP     BC
-        LD      (USERAFAL),BC 
+        LD      (USERAFAL),BC
 
         LD      SP,MSTKBASE     ; SET UP MONITOR STACK
 ;
 ;  CLEAR THE KEYBOARD BUFFER, SO THAT MONITOR OR DDT DO NOT PROCESS
-;  INPUT INTENDED FOR THE USER PROGRAM. 
+;  INPUT INTENDED FOR THE USER PROGRAM.
 ;
         ;    CALL    KEYINIT         ; CLEAR KEYBOARD BUFFER
 ;
@@ -529,31 +527,31 @@ $10
 ;
 GODDT
         LD      IY,(TRAPADR)    ; GET ADDRESS OF HANDLER ORIGIN
-        
+
         .IF     ~DDTMON
-        
-        LD      A,(IY+0)        ; GET FIRST BYTE OF HANDLER 
+
+        LD      A,(IY+0)        ; GET FIRST BYTE OF HANDLER
         CP      TRPCODE         ; SEE IF IT RESEMBLES HANDLER
         JP      NZ,NODDTC       ; JUMP IF HANDLER NOT THERE
 
         .ENDC
-        
+
         LD      BC,TRPEND       ; OFFSET OF ENTRY POINT IN HANDLER
         ADD     IY,BC           ; ADD TO HANDLER ORIGIN
         EI                      ; ENABLE INTERRUPTS SO I/O WORKS
         JP      (IY+0)          ; GO TO HANDLER
-        
-        
+
+
         .IF     ~DDTMON
-        
+
 NODDTC
         CALL    DISPINIT         ; INITIALIZE THE I/O DRIVERS
         CALL    DSKINIT
         CALL    SCCINIT
         JP      WASTRP          ; GO TO MONITOR DISPLAY SCREEN
-        
+
         .ENDC
-        
+
         .PAGE
 ;*        MASKABLE INTERRUPT HANDLERS
 ;
@@ -621,9 +619,6 @@ L_MONFRM .EQU    $-MONFRAM       ; LENGTH OF FRAME DATA
 ;  THE DEFAULT DISK UNIT.  IF READY, DO A 'F' COMMAND.
 ;
 WASRESET
-        LD      BC,DEFUNIT*100H ; LOAD B AND C
-        JP      RDBOOT          ; GO READ AND EXECUTE BOOTSTRAP
-
 
 
 ;*
@@ -643,15 +638,7 @@ $10
         AND     A
         JR      Z,$10       ; LOOP IF NO KEYSTRIKE YET
 
-;
-;
-;  GET THE BOOTSTART UNIT NUMBER FROM OPERATOR TYPE-IN.
-;
-        CALL    KEYCHAR         ; READ KEYBOARD
-        LD      A,C             ; MOVE CHARACTER TO A REGISTER
-        SUB     CH_0            ; CONVERT TO BINARY
-        LD      B,A             ; MOVE UNIT NUMBER TO B
-        JR      RDBOOT
+        JP	0800H		; Jump to PROM 1
 
 
 
@@ -667,7 +654,7 @@ $10
 ;  ENTER HERE WITH UNIT NUMBER IN B, AND BOOT ENTRY CODE IN C.
 ;
 RDBOOT
-        PUSH    BC              ; SAVE BOOTSTRAP PARAMETERS 
+        PUSH    BC              ; SAVE BOOTSTRAP PARAMETERS
 
         LD      HL,LOWIMG       ; INITIALIZE REQUEST BLOCK IN RAM
         LD      DE,BOOTRB
@@ -689,7 +676,7 @@ RDBOOT
 ;
         POP     BC              ; SETUP B AND C
         LD      HL,LASTRAM      ; LAST AVAILABLE RAM ADDRESS
-        LD      SP,LASTRAM      ; SET UP USER STACK POINTER 
+        LD      SP,LASTRAM      ; SET UP USER STACK POINTER
 
         EI                      ; ENABLE INTERRUPTS IN USER PROGRAM
         JP      BOOTADR         ; GO EXECUTE BOOTSTRAP
@@ -698,15 +685,15 @@ RDBOOT
 
 ;*
 ;  I/O ERROR WHILE READING IN BOOTSTRAP.  SAVE THE ERROR CODE IN
-;  THE MONITOR WORK AREA FOR POSSIBLE EXAMINATION WITH DDT, 
+;  THE MONITOR WORK AREA FOR POSSIBLE EXAMINATION WITH DDT,
 ;  AND GO BACK TO THE MONITOR COMMAND ROUTINE.
 ;
 $10
         LD      (USERAF+1),A    ; SAVE ERROR IN USER A
-        JP      WASTRP          ; RETURN TO MONITOR COMMAND PROCESSOR 
+        JP      WASTRP          ; RETURN TO MONITOR COMMAND PROCESSOR
 
         .ENDC
-        
+
         .PAGE
         .IF      0              ; ELIMINATE TO SAVE SPACE
 
@@ -742,11 +729,11 @@ MONEXIT
         LD      IY,(USERIY)
 
         LD      A,(USERI)       ; GET I REGISTER
-        LD      I,A 
+        LD      I,A
 
-        LD      A,(USERN)       ; GET INTERRUPT ENABLE FLAG 
+        LD      A,(USERN)       ; GET INTERRUPT ENABLE FLAG
         BIT     0,A             ; CHECK FLAG
-        JR      Z,$10      ; JUMP IF NOT SET 
+        JR      Z,$10      ; JUMP IF NOT SET
         EI      ENABLE          ; INTERRUPTS
 
 $10
@@ -758,7 +745,7 @@ $10
         .PAGE
 
         .IF     ~DDTMON
-        
+
 ;*        BOOTSTRAP REQUEST BLOCK IMAGE
 ;
 
@@ -768,36 +755,36 @@ LOWIMG
         .BYTE   BOOTHD          ; HEAD ADDRESS
         .BYTE   BOOTSEC         ; SECTOR ADDRESS
         .BYTE   MAPOPT+V_DRQDDN+RQSIZ5 ; FORMAT CODE
-        .BYTE   0               ; FLAGS 
+        .BYTE   0               ; FLAGS
         .BYTE   1               ; START OF LOGICAL TRACK
         .BYTE   0               ; RESERVED
-        .WORD   BOOTADR         ; ADDRESS OF BOOT IN MEMORY 
+        .WORD   BOOTADR         ; ADDRESS OF BOOT IN MEMORY
         .BYTE   1               ; NUMBER OF SECTORS
 
         .BYTE   0               ; MARK END OF LIST
-        
+
         .ENDC
-        
+
         .PAGE
         .INCLUDE DRV_DSP.TEXT
         .PAGE
-        
+
         .IF     ~DDTMON
-        
+
         .INCLUDE DRV_DSK.TEXT
-        
+
         .ENDC
-        
+
         .PAGE
         .INCLUDE DRV_SCC.TEXT
         .PAGE
-        
+
         .IF     DDTMON
-        
+
         .INCLUDE KEY_TBL.TEXT
-        
+
         .ENDC
-        
+
         ASSUME  *,LT,ORIGIN+PROMSIZE ; MUST FIT IN ROM
         .ORG    PROMSIZE             ; FORCE ERROR ON OVERFLOW OF PROM
         .END
