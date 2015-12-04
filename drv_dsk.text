@@ -7,7 +7,7 @@
 ;         ENTRY - NO PARAMETERS
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;  DSKSEEK - PERFORM SEEK.  MAY BE DONE ASYNCHRONOUSLY.
@@ -17,7 +17,7 @@
 ;         ENTRY - HL POINTS TO REQUEST BLOCK
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;  DSKRD - READ DISK.  CURRENTLY LIMITED TO SINGLE-SECTOR.
@@ -26,16 +26,16 @@
 ;         ENTRY - HL POINTS TO REQUEST BLOCK
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;  DSKWRT - WRITE DISK.  CURRENTLY LIMITED TO SINGLE-SECTOR.
-;           MAY BE DONE ASYNCHRONOUSLY. 
+;           MAY BE DONE ASYNCHRONOUSLY.
 ;
 ;         ENTRY - HL POINTS TO REQUEST BLOCK
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;  DSKSTAT - GET STATUS OF ASYNCHRONOUS OPERATION.  WAITS FOR
@@ -45,7 +45,7 @@
 ;         ENTRY - HL POINTS TO REQUEST BLOCK
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;  DSKADR - TRANSLATE RELATIVE DISK ADDRESS.
@@ -54,16 +54,16 @@
 ;                 HL POINTS TO REQUEST BLOCK.
 ;
 ;         EXIT - A CONTAINS ERROR CODE
-;                Z FLAG SET IF NO ERROR 
+;                Z FLAG SET IF NO ERROR
 ;                ALL REGISTERS USED
 ;
 ;
 ;
 ;
 ;  ON ALL REQUESTS TO THIS MODULE, HL POINTS TO A REQUEST BLOCK
-        
-        
-        
+
+
+
 ;*      MODIFICATIONS:
 ;
 ;  05 Jan 85 - Load firmware via m memory buffer, so that the ROM holding
@@ -71,7 +71,7 @@
 ;              disk controller window.
 ;
         .PAGE
-;*        ASSEMBLY PARAMETERS 
+;*        ASSEMBLY PARAMETERS
 ;
 ;
 DSKWINDW .EQU   0FC00H          ; ADDRESS OF CONTROLLER MEMORY WINDOW
@@ -107,7 +107,7 @@ C_DWRES .EQU    9               ; RESERVED BYTE
 
 
 
-;*        FUNCTION CODES FOR CONTROLLER 
+;*        FUNCTION CODES FOR CONTROLLER
 ;
 ;
 SEEKONLY .EQU    01H             ; DO SEEK ONLY
@@ -149,11 +149,11 @@ V_FMTBGS .EQU    20H
 
 LE_FMT  .EQU    1               ; ENTRY LENGTH
         .PAGE
-;*        DSKSEEK ENTRY POINT 
+;*        DSKSEEK ENTRY POINT
 ;
 ;
         .IF     0
-        
+
 DSKSEEK
         CALL    FNDMAP          ; FIND MAPPING ENTRY
         CALL    GETDCONT        ; GET DISK CONTROLLER
@@ -166,7 +166,7 @@ DSKSEEK
         CALL    WAKCONT         ; WAKE UP CONTROLLER
 
         JR      CHKASYN
-        
+
         .ENDC
         .PAGE
 ;*        DSKWRT ENTRY POINT
@@ -224,7 +224,7 @@ DSKCHK
 ;  RETURN CONTROLLER ERROR CODE TO THE USER.
 ;
 DSKEXIT
-        PUSH    IY              ; PUT REQ BLK POINTER IN DE 
+        PUSH    IY              ; PUT REQ BLK POINTER IN DE
         POP     DE
         CALL    PUTINFO         ; UPDATE ADDRESS INFO IN REQ BLK
         LD      A,(DCNTERR)     ; GET ERROR CODE
@@ -251,16 +251,16 @@ DSKRD
 
         CALL    WAKCONT         ; START UP CONTROLLER
 ;
-;  WAIT FOR OPERATION DONE, AND THEN COPY THE DATA FROM THE 
+;  WAIT FOR OPERATION DONE, AND THEN COPY THE DATA FROM THE
 ;  CONTROLLER BUFFER TO THE USER BUFFER.
 ;
         CALL    GETDCONT        ; WAIT FOR AND GET CONTROLLER
 
-        LD      E,(HL)          ; GET USER BUF ADR FROM REQUEST BLOCK 
+        LD      E,(HL)          ; GET USER BUF ADR FROM REQUEST BLOCK
         INC     HL
         LD      D,(HL)          ; HIGH PART OF ADDRESS
 
-        LD      HL,DCNTBUF      ; CONTROLLER BUFFER ADDRESS 
+        LD      HL,DCNTBUF      ; CONTROLLER BUFFER ADDRESS
 
         LD      BC,L_BIGSEC     ; ASSUME LARGE SECTOR SIZE
         BIT     S_FMTBGS,(IX+C_FMTFLG)
@@ -273,7 +273,7 @@ DSKRD1
 
         JP      DSKEXIT         ; GO GET ERROR CODE
         .PAGE
-;*        DSKSTAT ENTRY POINT 
+;*        DSKSTAT ENTRY POINT
 ;
 ;
 DSKSTAT
@@ -295,14 +295,14 @@ DSKINIT
 ;
 ;  MOVE THE FIRMWARE FROM ROM INTO A BUFFER AREA IN MEMORY.
 ;  SINCE THE DISK CONTROLLER COMES UP AFTER A RESET WITH ITS WINDOW
-;  MAPPED INTO THE ADDRESS SPACE, WE HAVE TO REMOVE IT TO GET TO 
+;  MAPPED INTO THE ADDRESS SPACE, WE HAVE TO REMOVE IT TO GET TO
 ;  THE PROM.
 ;
         LD      A,76H           ; PUT HALT IN CONTROLLER LOC 0000
         LD      (DSKWINDW),A
         XOR     A
         OUT     (P_DC),A        ; REMOVE DISK WINDOW FROM ADDRESS SPACE
-        
+
         LD      HL,DSKCTLW      ; ADDRESS OF FIRMWARE
         LD      DE,DSKCWBUF     ; BUFFER ADDRESS
         LD      BC,L_CTLW       ; LENGTH OF FIRMWARE
@@ -335,17 +335,17 @@ DSKINITA
         .PAGE
 ;*        ENTRY POINT DSKADR - CONVERT DISK ADDRESS
 ;
-;         ENTRY - HL POINTS TO DISK REQUEST BLOCK 
+;         ENTRY - HL POINTS TO DISK REQUEST BLOCK
 ;                 DE CONTAINS DESIRED BLOCK NUMBER
 ;
 ;         EXIT - CONVERTED ADDRESS INSERTED INTO REQUEST BLOCK
-;                A REGISTER SET TO ZERO 
+;                A REGISTER SET TO ZERO
 ;                Z FLAG SET
 ;
 DSKADR
         CALL    FNDMAP          ; FIND MAPPING ENTRY
 ;
-;  BEGIN THE CONVERSION BY DIVIDING THE BLOCK NUMBER BY THE 
+;  BEGIN THE CONVERSION BY DIVIDING THE BLOCK NUMBER BY THE
 ;  NUMBER OF BLOCKS IN A SECTOR.
 ;
         EX      DE,HL           ; MOVE BLOCK NUMBER TO HL
@@ -380,7 +380,7 @@ FMT7
         BIT     S_FMTSK0,(IX+C_FMTFLG)
         JR      Z,FMT4          ; JUMP IF DON'T SKIP 0
 
-        INC     (IY+C_DRQTRK) 
+        INC     (IY+C_DRQTRK)
 ;
 ;  COMPUTE S0, THE STARTING SECTOR OF THE CURRENT LOGICAL TRACK.
 ;  SO = ( T * OFS ) MOD CS + ADJ, WHERE OFS IS THE OFFSET.
@@ -392,11 +392,11 @@ FMT4
         JR      NZ,FMT3         ; JUMP IF OFFSET = 0
 
         LD      L,E             ; MOVE T TO HL (ASSUME T < 256)
-        ADD     HL,HL           ; T * 2 
+        ADD     HL,HL           ; T * 2
         BIT     S_FMTOF2,(IX+C_FMTFLG)
         JR      NZ,FMT5         ; JUMP IF OFFSET = 2
 
-        ADD     HL,HL           ; T * 4 
+        ADD     HL,HL           ; T * 4
         ADD     HL,DE           ; * 5
         ADD     HL,DE           ; * 6
 
@@ -417,7 +417,7 @@ FMT3
         SRA     E               ; CS DIV 2
         INC     D               ; ASSUME ADJ = 1
         CP      E
-        JR      C,FMT2          ; JUMP IF .LE. 12 
+        JR      C,FMT2          ; JUMP IF .LE. 12
 
         INC     D               ; ADJ = 2
 
@@ -459,9 +459,9 @@ FMT6
 ;
 ;
 FMTTBL
-        .BYTE   0               ; MAPPING CODE 0 UNASSIGNED 
-        .BYTE   V_FMTSC1+V_FMTOF0+V_FMTIN6 ; CP/M 
-        .BYTE   V_FMTSC1+V_FMTSK0 ; UCSD STANDARD 
+        .BYTE   0               ; MAPPING CODE 0 UNASSIGNED
+        .BYTE   V_FMTSC1+V_FMTOF0+V_FMTIN6 ; CP/M
+        .BYTE   V_FMTSC1+V_FMTSK0 ; UCSD STANDARD
         .BYTE   V_FMTOF2+V_FMTBGS ; OPTIMIZED
         .PAGE
 ;*        SUBROUTINE FNDMAP - FIND MAPPING ENTRY IN TABLE
@@ -470,7 +470,8 @@ FMTTBL
 ;
 ;         EXIT - REQUEST BLOCK POINTER IN IY
 ;                MAPPING ENTRY POINTER IN IX
-;               REGISTERS A, B AND C USED.
+;                REGISTERS A, B AND C USED.
+;		 CARRY flag set if IDE driver should be used.
 ;
 FNDMAP
         PUSH    HL              ; MOVE REQUEST BLOCK ADR TO IY
@@ -480,14 +481,14 @@ FNDMAP
 ;
         LD      A,(IY+C_DRQMAP) ; GET BYTE WITH MAPPING CODE
         AND     V_DRQMAP
-        ASSUME  S_DRQMAP,EQ,4 
+        ASSUME  S_DRQMAP,EQ,4
         ASSUME  LE_FMT,EQ,1
         SRA     A               ; SHIFT CODE RIGHT 4 BITS
         SRA     A
         SRA     A
         SRA     A
         LD      C,A             ; MOVE TABLE OFFSET TO BC
-        LD      B,0 
+        LD      B,0
         LD      IX,FMTTBL       ; ADR OF TABLE
         ADD     IX,BC           ; COMPUTE ENTRY ADDRESS
 
@@ -495,7 +496,7 @@ FNDMAP
         .PAGE
 ;*        SUBROUTINE GETDCONT - GET DISK CONTROLLER
 ;
-;  THIS SUBROUTINE WAITS UNTIL THE DISK CONTROLLER IS IDLE, 
+;  THIS SUBROUTINE WAITS UNTIL THE DISK CONTROLLER IS IDLE,
 ;  AND THEN CONNECTS IT TO THE PROCESSOR.
 ;
 ;         ENTRY - NO PARAMETERS
@@ -525,7 +526,7 @@ RUNWAIT
         .PAGE
 ;*        SUBROUTINE COPYINFO - COPY INFO FROM USER TO CONTROLLER
 ;
-;         ENTRY - HL POINTS TO USER REQUEST BLOCK 
+;         ENTRY - HL POINTS TO USER REQUEST BLOCK
 ;
 ;         EXIT -   HL POINTS TO BYTE AFTER FLAGS IN BLOCK
 ;                  BC, DE REGISTERS USED
@@ -540,7 +541,7 @@ COPYINFO
         .PAGE
 ;*        SUBROUTINE PUTINFO - UPDATE USER'S REQUEST BLOCK
 ;
-;         ENTRY - DE POINTS TO USER REQUEST BLOCK 
+;         ENTRY - DE POINTS TO USER REQUEST BLOCK
 ;
 ;         EXIT - HL,BC,DE REGISTERS USED
 ;
@@ -552,7 +553,7 @@ PUTINFO
 
         RET
         .PAGE
-;*        SUBROUTINE RLSCONT - RELEASE CONTROLLER 
+;*        SUBROUTINE RLSCONT - RELEASE CONTROLLER
 ;
 ;  THIS SUBROUTINE SWITCHES THE CONTROLLER WINDOW OUT OF
 ;  PROCESSOR MEMORY SPACE.
