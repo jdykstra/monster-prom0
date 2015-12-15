@@ -78,6 +78,7 @@ DSKWINDW .EQU   0FC00H          ; ADDRESS OF CONTROLLER MEMORY WINDOW
 DSKCWBUF .EQU   08000H          ; BUFFER FOR LOADING CONTROLWARE
 DSKCTLW .EQU    0800H           ; CONTROLWARE ADDRESS
 L_CTLW  .EQU    0400H           ; LENGTH OF FIRMWARE
+DRV_IDE	.EQU	0840H		; Origin of IDE driver
 
 
 
@@ -116,17 +117,17 @@ RDSEC   .EQU    03H             ; READ SECTOR
 NOOP    .EQU    0               ; NO OPERATION
 
 
+;* 	  ENTRY points into IDE DRIVER
+IDEREAD	.EQU	DRV_IDE+0	; Read entry POINT
+IDEWRITE .EQU	DRV_IDE+3	; Write entry POINT
+IDEINIT	.EQU	DRV_IDE+6	; Initialization entry point
+
+
 
 ;*        FORMAT OF THE REQUEST BLOCK
 ;
 ;
 S_DSKASY .EQU    7               ; ASYNCHRONOUS BIT IN FLAG BYTE
-
-
-
-;*        STATIC VARIABLES
-;
-;
 
 
 
@@ -156,7 +157,12 @@ LE_FMT  .EQU    1               ; ENTRY LENGTH
 
 DSKSEEK
         CALL    FNDMAP          ; FIND MAPPING ENTRY
-        CALL    GETDCONT        ; GET DISK CONTROLLER
+        JR	NC,$10		; JUMP IF NOT IDE
+
+        XOR	A		; CLEAR ERROR CODE
+        RET
+
+$10	CALL    GETDCONT        ; GET DISK CONTROLLER
 
         CALL    COPYINFO        ; PASS INFO TO CONTROLLER
 
@@ -174,8 +180,11 @@ DSKSEEK
 ;
 DSKWRT
         CALL    FNDMAP          ; FIND MAPPING ENTRY
+        JR	NC,$10		; JUMP IF NOT IDE
 
-        CALL    GETDCONT        ; GET DISK CONTROLLER
+        JP	IDEWRITE	; GO to IDE driver
+
+$10     CALL    GETDCONT        ; GET DISK CONTROLLER
 
         CALL    COPYINFO        ; PASS ADDRESS INFO TO CONTROLLER
 ;
@@ -241,8 +250,11 @@ DSKEXIT
 ;
 DSKRD
         CALL    FNDMAP          ; FIND MAPPING ENTRY
+        JR	NC,$10		; JUMP IF NOT IDE
 
-        CALL    GETDCONT        ; GET DISK CONTROLLER
+        JP	IDEREAD		; GO to IDE driver
+
+$10     CALL    GETDCONT        ; GET DISK CONTROLLER
 
         CALL    COPYINFO        ; PASS ADDRESS INFO TO CONTROLLER
 
@@ -331,7 +343,8 @@ DSKINITA
         BIT     S_DCIRUN,A
         JR      NZ,DSKINITA
 
-        JP      DSKEXIT         ; GO RETURN ERROR CODE TO CALLER
+        JP      IDEINIT         ; INITIALIZE IDE DRIVER.  It will return
+        			; to our caller
         .PAGE
 ;*        ENTRY POINT DSKADR - CONVERT DISK ADDRESS
 ;
@@ -344,11 +357,18 @@ DSKINITA
 ;
 DSKADR
         CALL    FNDMAP          ; FIND MAPPING ENTRY
+        JR	NC,$10		; JUMP IF NOT IDE
+;
+;  IDE drives use the block number directly as their LBA.
+;
+	LD	(IX+C_DRQTRK),DE ; Store two-byte LBA
+	XOR	A		; NO ERROR, set Z flag'
+	RET
 ;
 ;  BEGIN THE CONVERSION BY DIVIDING THE BLOCK NUMBER BY THE
 ;  NUMBER OF BLOCKS IN A SECTOR.
 ;
-        EX      DE,HL           ; MOVE BLOCK NUMBER TO HL
+$10     EX      DE,HL           ; MOVE BLOCK NUMBER TO HL
         BIT     S_FMTSC1,(IX+C_FMTFLG)
         JR      NZ,FMT1         ; JUMP IF ONE BLOCK PER SECTOR
 
@@ -481,6 +501,11 @@ FNDMAP
 ;
         LD      A,(IY+C_DRQMAP) ; GET BYTE WITH MAPPING CODE
         AND     V_DRQMAP
+        JR	NZ, $10		; JUMP IF not IDE DRIVER
+
+        SCF			: set carry FLAG and return
+        RET
+
         ASSUME  S_DRQMAP,EQ,4
         ASSUME  LE_FMT,EQ,1
         SRA     A               ; SHIFT CODE RIGHT 4 BITS
@@ -492,6 +517,7 @@ FNDMAP
         LD      IX,FMTTBL       ; ADR OF TABLE
         ADD     IX,BC           ; COMPUTE ENTRY ADDRESS
 
+	AND	A		; CLEAR carry flag (redundant?)
         RET
         .PAGE
 ;*        SUBROUTINE GETDCONT - GET DISK CONTROLLER
