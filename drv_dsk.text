@@ -362,7 +362,7 @@ DSKADR
 ;  IDE drives use the block number directly as their LBA.
 ;
 	LD	(IX+C_DRQTRK),DE ; Store two-byte LBA
-	XOR	A		; NO ERROR, set Z flag'
+	XOR	A		; NO ERROR, set Z flag
 	RET
 ;
 ;  BEGIN THE CONVERSION BY DIVIDING THE BLOCK NUMBER BY THE
@@ -503,7 +503,7 @@ FNDMAP
         AND     V_DRQMAP
         JR	NZ, $10		; JUMP IF not IDE DRIVER
 
-        SCF			: set carry FLAG and return
+        SCF			; set carry FLAG and return
         RET
 
         ASSUME  S_DRQMAP,EQ,4
