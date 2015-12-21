@@ -508,7 +508,7 @@ FNDMAP
 
         ASSUME  S_DRQMAP,EQ,4
         ASSUME  LE_FMT,EQ,1
-        SRA     A               ; SHIFT CODE RIGHT 4 BITS
+$10     SRA     A               ; SHIFT CODE RIGHT 4 BITS
         SRA     A
         SRA     A
         SRA     A
