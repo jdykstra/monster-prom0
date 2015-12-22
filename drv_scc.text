@@ -117,6 +117,7 @@
         .PAGE
 ;*      Modification History:
 ;
+;  22 Dec 15 - Get configuration from config.text.
 ;  04 Feb 85 - Added MONDDT assembly option for MONITOR.
 ;  05 Jan 85 - Added SERSET routine and modified SCCINIT to use it.
 ;  29 Dec 84 - Added user interrupt and upper-case lock.
@@ -138,17 +139,6 @@
 ;
 ;
 SCC     .EQU    0D0H            ; SCC I/O PORT BASE ADDRESS
-
-        .IF     ~DDTMON
-        
-KEY_TBL .EQU    0C00H           ; KEY TRANSLATION TABLE ADDRESS
-
-        .ELSE
-        
-KEY_TBL .EQU    0700H           ; KEY TRANSLATION TABLE ADDRESS
-
-        .ENDC
-        
 RPERIOD .EQU    3               ; KEY REPEAT PERIOD, IN TICKS
 MAXSCNT .EQU    128              ; SERIAL BUFFER HOLDS 128 CHARACTERS
 MAXKCNT .EQU    25.             ; TYPE-AHEAD BUFFER SIZE

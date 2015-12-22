@@ -1,34 +1,36 @@
-        .TITLE  "MONITOR - System ROM-Resident Monitor and BIOS"
+        .TITLE  "MONITOR - SYSTEM ROM-RESIDENT MONITOR AND BIOS"
         .ABSOLUTE
         .PROC   MONITOR
+
+	.INCLUDE  CONFIG.TEXT
 
         .ORG    0000H
 
 
 ;
-;  "Z2" was the last monitor version built in the 1980's.
-;  I believe that I bumped the letter part of the version code when a
-;  change was made that was incompatible with other parts of the software.
-;  I don't remember why I jumped to "Z" in the 1980's, nor what the
-;  last letter that I'd used before that was.  So I'll start the
-;  2015 version of monitor with "M".
+;  "Z2" WAS THE LAST MONITOR VERSION BUILT IN THE 1980'S.
+;  I BELIEVE THAT I BUMPED THE LETTER PART OF THE VERSION CODE WHEN A
+;  CHANGE WAS MADE THAT WAS INCOMPATIBLE WITH OTHER PARTS OF THE SOFTWARE.
+;  I DON'T REMEMBER WHY I JUMPED TO "Z" IN THE 1980'S, NOR WHAT THE
+;  LAST LETTER THAT I'D USED BEFORE THAT WAS.  SO I'LL START THE
+;  2015 VERSION OF MONITOR WITH "M".
 ;
 
-VERSION  .EQU  "X1"
+VERSION  .EQU  "M2"
 
 ;       MODIFICATIONS:
 ;
-;  26 Nov 15 - Add support for IDE disk controller (M1).
-;  04 Feb 85 - Added assembly option to make MONITOR work with DDT in PROM.
-;  05 Jan 85 - Changed memory configuration to use all of top memory (K3).
-;  29 Dec 84 - ADDED USER INTERRUPT ENTRY POINT (K2).
+;  21 DEC 15 - USE CONFIG.TEXT FOR SYMBOLS SHARED BETWEEN PROM 0 AND PROM 1 (M2).
+;  26 NOV 15 - ADD SUPPORT FOR IDE DISK CONTROLLER (M1).
+;  04 FEB 85 - ADDED ASSEMBLY OPTION TO MAKE MONITOR WORK WITH DDT IN PROM.
+;  05 JAN 85 - CHANGED MEMORY CONFIGURATION TO USE ALL OF TOP MEMORY (K3).
+;  29 DEC 84 - ADDED USER INTERRUPT ENTRY POINT (K2).
 ;
 ;
 ;
 ;
 
 
-LISTINC .EQU    0
         .INCLUDE *ASMINC.TEXT
         .INCLUDE DUTEXT.TEXT
 
@@ -37,87 +39,52 @@ LISTINC .EQU    0
 
 
         .PAGE
-;*        Monitor command options
+;*        MONITOR COMMAND OPTIONS
 ;
-;  When the monitor command routine is entered
-;  due to a processor reset or DDT M command,
-;  it first checks the CPU option switch.  If this
-;  switch is set and disk unit zero is ready, the
-;  monitor boots from that unit.  Otherwise, the
-;  monitor prompts the operator and waits for a
-;  boot unit number.
-;
-
-
-
-;*        Bootstrap entry conditions
-;
-;  B register contains the number of the disk unit
-;         from which the bootstrap was read.
-;
-;  C register contains the entry code:
-;
-;         0 - Fast bootstrap (monitor F command)
-;         1 - Standard bootstrap (monitor B command)
-;         FF - Patching mode (monitor P command)
-;
-;  HL register contains the address of the highest
-;  memory location that is available.
-;
-;  SP register equal to HL.
+;  WHEN THE MONITOR COMMAND ROUTINE IS ENTERED
+;  DUE TO A PROCESSOR RESET OR DDT M COMMAND,
+;  IT FIRST CHECKS THE CPU OPTION SWITCH.  IF THIS
+;  SWITCH IS SET AND DISK UNIT ZERO IS READY, THE
+;  MONITOR BOOTS FROM THAT UNIT.  OTHERWISE, THE
+;  MONITOR PROMPTS THE OPERATOR AND WAITS FOR A
+;  BOOT UNIT NUMBER.
 ;
 
 
 
-;*        Monitor Requests
+;*        BOOTSTRAP ENTRY CONDITIONS
 ;
-;  Monitor requests are made via a RST 40 instruction.  Alternately,
-;  the request may be made with a CALL instruction
-;  directly to entry point REQUEST in MONITOR.
+;  B REGISTER CONTAINS THE NUMBER OF THE DISK UNIT
+;         FROM WHICH THE BOOTSTRAP WAS READ.
 ;
-;  The request number (see below) is passed in
-;  register A.  Registers B, C, D, E, H, L and IY
-;  are available for passing parameters to
-;  MONITOR, and all registers are available
-;  for MONITOR to pass responses back to the
-;  caller.
+;  C REGISTER CONTAINS THE ENTRY CODE:
+;
+;         0 - FAST BOOTSTRAP (MONITOR F COMMAND)
+;         1 - STANDARD BOOTSTRAP (MONITOR B COMMAND)
+;         FF - PATCHING MODE (MONITOR P COMMAND)
+;
+;  HL REGISTER CONTAINS THE ADDRESS OF THE HIGHEST
+;  MEMORY LOCATION THAT IS AVAILABLE.
+;
+;  SP REGISTER EQUAL TO HL.
+;
+
+
+
+;*        MONITOR REQUESTS
+;
+;  MONITOR REQUESTS ARE MADE VIA A RST 40 INSTRUCTION.  ALTERNATELY,
+;  THE REQUEST MAY BE MADE WITH A CALL INSTRUCTION
+;  DIRECTLY TO ENTRY POINT REQUEST IN MONITOR.
+;
+;  THE REQUEST NUMBER (SEE BELOW) IS PASSED IN
+;  REGISTER A.  REGISTERS B, C, D, E, H, L AND IY
+;  ARE AVAILABLE FOR PASSING PARAMETERS TO
+;  MONITOR, AND ALL REGISTERS ARE AVAILABLE
+;  FOR MONITOR TO PASS RESPONSES BACK TO THE
+;  CALLER.
 ;
         .PAGE
-;*        ASSEMBLY PARAMETERS AND CONFIGURATION INFO
-;
-;
-FALSE   .EQU    0
-TRUE    .EQU    ~FALSE
-
-DDTMON  .EQU    FALSE
-
-        .IF     ~DDTMON
-INROM   .EQU    1               ; IF ZERO, LOADED BY ANOTHER MONITOR
-ORIGIN  .EQU    0000H           ; ORIGIN OF MONITOR IN ADDRESS SPACE
-MONWORK .EQU    0FA80H          ; MONITOR WORK AREA IN RAM
-WORKB   .EQU    0FB00H          ; ADDITIONAL WORK AREA
-PROMSIZE .EQU   0800H           ; SIZE OF PROM CONTAINING MONITOR
-SCREEN  .EQU    1000H           ; DISPLAY IMAGE BUFFER ADR
-DEFUNIT .EQU    0               ; DEFAULT BOOTSTRAP DISK UNIT
-BOOTTRK .EQU    0               ; TRACK ADDRESS OF BOOTSTRAP
-BOOTHD  .EQU    0               ; HEAD ADDRESS OF BOOTSTRAP
-BOOTSEC .EQU    1               ; SECTOR ADDRESS OF BOOTSTRAP
-BOOTRB  .EQU    7000H           ; PLACE TO PUT RB FOR READING BOOTSTRAP
-BOOTADR .EQU    8000H           ; ADDRESS OF BOOTSTRAP IN MEMORY
-LASTRAM .EQU    0FA7EH          ; LAST AVAILABLE RAM WORD ADDRESS
-
-        .ELSE
-
-DDTINIT .EQU    0801H           ; INITIALIZATION ENTRY TO DDT IN PROM
-INROM   .EQU    1               ; IF ZERO, LOADED BY ANOTHER MONITOR
-ORIGIN  .EQU    0000H           ; ORIGIN OF MONITOR IN ADDRESS SPACE
-MONWORK .EQU    01F80H          ; MONITOR WORK AREA IN RAM
-PROMSIZE .EQU   0800H           ; SIZE OF PROM CONTAINING MONITOR
-SCREEN  .EQU    1000H           ; DISPLAY IMAGE BUFFER ADR
-LASTRAM .EQU    0FA7EH          ; LAST AVAILABLE RAM WORD ADDRESS
-
-        .ENDC
-
 
 
 ;*        TEMPORARY DEFINITIONS
@@ -339,9 +306,9 @@ REQUEST
         .PAGE
 ;*      USER INTERRUPT ENTRY POINT
 ;
-;  If the keyboard interrupt handler sees a particular key combination,
-;  it sets up the stack so that the processor comes here after completion
-;  of the interrupt.
+;  IF THE KEYBOARD INTERRUPT HANDLER SEES A PARTICULAR KEY COMBINATION,
+;  IT SETS UP THE STACK SO THAT THE PROCESSOR COMES HERE AFTER COMPLETION
+;  OF THE INTERRUPT.
 ;
 ;       ENTRY - USER PC ON TOP OF STACK
 ;
@@ -444,7 +411,8 @@ DORESET
         CALL    SCCINIT         ; INITIALIZE SERIAL COMM. CONTROLLER
 
         .IF     ~DDTMON
-
+	CALL	DSKINIT		; INITIALIZE FLOPPY DISK DRIVER
+	CALL	IDEINIT		; INITIALIZE IDE DRIVER
         JP      WASRESET
 
         .ELSE
@@ -548,6 +516,8 @@ NODDTC
         CALL    DISPINIT         ; INITIALIZE THE I/O DRIVERS
         CALL    DSKINIT
         CALL    SCCINIT
+        CALL	IDEINIT
+
         JP      WASTRP          ; GO TO MONITOR DISPLAY SCREEN
 
         .ENDC
@@ -619,7 +589,10 @@ L_MONFRM .EQU    $-MONFRAM       ; LENGTH OF FRAME DATA
 ;  THE DEFAULT DISK UNIT.  IF READY, DO A 'F' COMMAND.
 ;
 WASRESET
-
+	.IF	~STANDALONE
+	LD      BC,DEFUNIT*100H ; LOAD B AND C
+	JP      RDBOOT          ; GO READ AND EXECUTE BOOTSTRAP
+	.ENDC
 
 ;*
 ;  DISPLAY MONITOR COMMAND FRAME, AND GET COMMAND FROM USER.
@@ -636,14 +609,26 @@ $10
         CALL    KEYSTAT
         LD      A,C             ; GET RESULT OF STATUS CHECK
         AND     A
-        JR      Z,$10       ; LOOP IF NO KEYSTRIKE YET
+        JR      Z,$10		; LOOP IF NO KEYSTRIKE YET
 
-        JP	0800H		; Jump to PROM 1
-
+	.IF	STANDALONE
+        JP	IDETEST		; JUMP TO IDE TEST PROGRAM
+        .ELSE
+;
+;
+;  GET THE BOOTSTART UNIT NUMBER FROM OPERATOR TYPE-IN.
+;
+        CALL    KEYCHAR         ; READ KEYBOARD
+        LD      A,C             ; MOVE CHARACTER TO A REGISTER
+        SUB     CH_0            ; CONVERT TO BINARY
+        LD      B,A             ; MOVE UNIT NUMBER TO B
+        JR      RDBOOT
+        .ENDC
 
 
 ;*
 ;  USE DEFAULT UNIT NUMBER.
+;  ??  DEAD CODE, SINCE AT LEAST 1985.
 ;
         LD      B,DEFUNIT       ; USE DEFAULT UNIT NUMBER
 
@@ -670,7 +655,7 @@ RDBOOT
         LD      HL,BOOTRB       ; PERFORM SECTOR READ
         CALL    DSKRD
         AND     A
-        JR      NZ,$10      ; JUMP ON I/O ERRORS
+        JR      NZ,$10		; JUMP ON I/O ERRORS
 ;
 ;  SET UP BOOTSTRAP ENTRY PARAMETERS, AND GO TO IT.
 ;
