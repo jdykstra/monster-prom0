@@ -117,7 +117,7 @@
         .PAGE
 ;*      Modification History:
 ;
-;  22 Dec 15 - Get configuration from config.text.
+;  22 Dec 15 - Get configuration from BIOS_CFG.TEXT.
 ;  04 Feb 85 - Added MONDDT assembly option for MONITOR.
 ;  05 Jan 85 - Added SERSET routine and modified SCCINIT to use it.
 ;  29 Dec 84 - Added user interrupt and upper-case lock.
