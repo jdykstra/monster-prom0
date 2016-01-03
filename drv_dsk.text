@@ -492,18 +492,22 @@ FNDMAP
         PUSH    HL              ; MOVE REQUEST BLOCK ADR TO IY
         POP     IY
 ;
-;  LOCATE THE PROPER ENTRY IN THE MAPPING TABLE.
+;  CHECK FOR IDE UNIT NUMBER.
 ;
-        LD      A,(IY+C_DRQMAP) ; GET BYTE WITH MAPPING CODE
-        AND     V_DRQMAP
-        JR	NZ, $10		; JUMP IF NOT IDE DRIVER
+        LD      A,(IY+C_DRQUNT) ; GET UNIT NUMBER
+        AND     2H
+        JR	Z, $10		; JUMP IF NOT IDE UNIT
 
         SCF			; SET CARRY FLAG AND RETURN
         RET
 
+;
+;  LOCATE THE PROPER ENTRY IN THE MAPPING TABLE.
+;
         ASSUME  S_DRQMAP,EQ,4
         ASSUME  LE_FMT,EQ,1
-$10     SRA     A               ; SHIFT CODE RIGHT 4 BITS
+$10     LD	A,(IY+C_DRQMAP)	; GET MAPPING CODE
+	SRA     A               ; SHIFT CODE RIGHT 4 BITS
         SRA     A
         SRA     A
         SRA     A

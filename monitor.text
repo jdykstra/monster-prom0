@@ -424,6 +424,43 @@ DORESET
         .ENDC
 
         .PAGE
+;*        MASKABLE INTERRUPT HANDLERS
+;
+;  THESE ARE LOCATED HERE TO MAKE USE OF THE MEMORY BEFORE
+;  THE FIXED INTERRUPT VECTOR.  THEY CAN BE MOVED AS NEEDED
+;  DURING FUTURE RE-ORGANIZATIONS.
+LEVEL0
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV0
+        JP      DOTRAP
+
+LEVEL1
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV1
+        JP      DOTRAP
+
+LEVEL2
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV2
+        JP      DOTRAP
+
+LEVEL3
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV3
+        JP      DOTRAP
+
+LEVEL4
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV4
+        JP      DOTRAP
+
+LEVEL5
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV5
+        JP      DOTRAP
+
+;  FURTHER LEVELS CONTINUED BELOW
+
 ;*        INTERRUPT VECTOR
 ;
 ;  THIS TABLE CONTAINS THE STARTING ADDRESS FOR THE
@@ -440,6 +477,19 @@ DORESET
         .WORD   LEVEL5
         .WORD   LEVEL6
         .WORD   LEVEL7
+
+;  CONTINUATION OF MASKABLE INTERRUPT HANDLERS AFTER
+;  THE FIXED INTERRUPT VECTOR TABLE.
+
+LEVEL6
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        JP      SCCINTR
+
+LEVEL7
+        PUSH    AF              ; SAVE USER A AND FLAGS
+        LD      A,USTLEV7
+        JP      DOTRAP
+
         .PAGE
 ;*        DOTRAP - PROCESS TRAP IN USER PROGRAM
 ;
@@ -523,48 +573,6 @@ NODDTC
 
         .ENDC
 
-        .PAGE
-;*        MASKABLE INTERRUPT HANDLERS
-;
-;
-LEVEL0
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV0
-        JP      DOTRAP
-
-LEVEL1
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV1
-        JP      DOTRAP
-
-LEVEL2
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV2
-        JP      DOTRAP
-
-LEVEL3
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV3
-        JP      DOTRAP
-
-LEVEL4
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV4
-        JP      DOTRAP
-
-LEVEL5
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV5
-        JP      DOTRAP
-
-LEVEL6
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        JP      SCCINTR
-
-LEVEL7
-        PUSH    AF              ; SAVE USER A AND FLAGS
-        LD      A,USTLEV7
-        JP      DOTRAP
         .PAGE
 
         .IF     ~DDTMON
@@ -726,7 +734,15 @@ $10
 
 ;*        BOOTSTRAP REQUEST BLOCK IMAGE
 ;
-
+;  WE USE THIS SAME REQUEST BLOCK FOR BOTH FLOPPY AND IDE
+;  BOOTS THROUGH SOME MAJOR KLUDGES.  DRV_DSK.TEXT
+;  RECOGNIZES IDE DRIVES THROUGH THEIR UNIT NUMBER, AND
+;  THE IDE DRIVER IGNORES THE DISK MAPPING CODE, SO IT
+;  DOESN'T MATTER WHAT IT IS FOR IDE DRIVES.  THE IDE
+;  DRIVER GETS THE BLOCK # FROM THE TWO BYTES USED BY
+;  THE FLOPPY DRIVER FOR TRACK AND HEAD ADDRESS.  THEY'RE
+;  ZERO FOR THE BOOT SECTOR, SO WE END UP WITH THE
+;  DESIRED LBA OF ZERO.
 LOWIMG
         .BLOCK  1               ; SPACE FOR UNIT NUMBER
         .BYTE   BOOTTRK         ; TRACK ADDRESS
