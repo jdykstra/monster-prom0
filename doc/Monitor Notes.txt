@@ -1,0 +1,75 @@
+General
+-------
+
+
+;*        Monitor command options
+;
+;  When the monitor command routine is entered
+;  due to a processor reset or DDT M command,
+;  it first checks the CPU option switch.  If this
+;  switch is set and disk unit zero is ready, the
+;  monitor boots from that unit.  Otherwise, the
+;  monitor prompts the operator and waits for a
+;  boot unit number.
+;
+
+
+
+;*        Bootstrap entry conditions
+;
+;  B register contains the number of the disk unit
+;         from which the bootstrap was read.
+;
+;  C register contains the entry code:
+;
+;         0 - Fast bootstrap (monitor F command)
+;         1 - Standard bootstrap (monitor B command)
+;         FF - Patching mode (monitor P command)
+;
+;  HL register contains the address of the highest
+;  memory location that is available.
+;
+;  SP register equal to HL.
+;
+
+
+
+;*        Monitor Requests
+;
+;  Monitor requests are made via a RST 40 instruction.  Alternately,
+;  the request may be made with a CALL instruction
+;  directly to entry point REQUEST in MONITOR.
+;
+;  The request number (see below) is passed in
+;  register A.  Registers B, C, D, E, H, L and IY
+;  are available for passing parameters to
+;  MONITOR, and all registers are available
+;  for MONITOR to pass responses back to the
+;  caller.
+;
+
+
+MSU-style (CDC-style?) symbol naming:  C_ is a byte offset.  V_ is a bit mask.  S_ is a bit number.  Apparently the macros used to define these fields on the COMPASS assembler (which can be seen in file "Monitor Requests 1981.pdf" couldn't be implemented on the monster.  Instead, DUTEXT.TEXT and ASMINC.TEXT contain individual symbol definitions, perhaps dumped and reformatted from COMPASS output.  There also was apparently a problem with these symbols filling up monster assembler memory;  they are divided into macros so only needed symbols are actually defined, and some symbols are ifdef-ed out entirely.
+
+The DSKCTL (disk firmware) code has this comment:
+
+;       11-Apr-98 - E6:  Updated macro definitions in formatting code
+;                   to follow P-System syntax.  Apparently this]
+;                   code has never been assembled since I was
+;                   doing assemblies on the mainframe.
+
+So it's not clear how much (if any) I built MONITOR on the Monster.
+
+I probably updated the letter part of version strings when I made a change that was incompatible with other parts of the software, and incremented the digit for bug fixes and compatible changes.  I don't remember what prompted me to jump the MONITOR version to Z*.
+
+Most of monitor proper (i.e. not the device drivers) is devoted to "gracefully" handing the different ways it can be entered (hardware and software interrupts, plus various flavors of reset).  Almost all of this is unneeded for normal operation.  It might be useful for diagnosing problems that cause the monitor to be entered unexpectedly, except that there's no way to access the information unless DDT is loaded.
+
+The INROM assembly-time variable supposedly allows one copy of MONITOR to be running under the control of another.  I've got no idea whether this works or ever did work.
+
+There may some unused memory above the MONITOR work area starting at 0xFC00.  It's overlayed by the disk controller memory window though--I'm not sure if that's an issue or not.
+
+There's some unused PROM space before the interupt vector at 0x100.  Some of this probably ought to be reserved for expansion of the monitor request dispatch table.
+
+There is source code for both an SCC driver and a serial driver, although only the SCC driver is built into the Z2 version.  The serial driver apparently drove a 8251--I don't know where it physically was on the hardware.
+
+

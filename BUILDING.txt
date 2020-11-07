@@ -1,0 +1,5 @@
+PROM 0
+------
+ucsdpsys -P "II.0" -r prom0/src -w pm_sys -b script1
+
+dd if=pm_sys/system.wrk.code of=prom0.bin skip=1 count=4
