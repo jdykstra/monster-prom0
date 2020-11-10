@@ -1,5 +1,5 @@
 PROM 0
 ------
-ucsdpsys -P "II.0" -r prom0/src -w pm_sys -b script1
+ucsdpsys -P "II.0" -w disk-images/BLDSYS/ -r monster-prom1/src/ -w disk-images/SCRTCH -b script1
 
 dd if=pm_sys/system.wrk.code of=prom0.bin skip=1 count=4
